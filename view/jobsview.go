@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/marrasen/kakel/app"
 
@@ -151,6 +152,9 @@ func (c *jobCard) want(j app.Job) []gunim.Node {
 func (c *jobCard) fill(j app.Job) {
 	c.title.Text = j.Title
 	c.detail.Text = j.Detail
+	if when := jobWhen(j, time.Now()); when != "" {
+		c.detail.Text = strings.TrimPrefix(c.detail.Text+" · "+when, " · ")
+	}
 	c.detail.Color = look.Faint
 	if j.Failed {
 		c.detail.Color = widget.DialogProblem
@@ -165,6 +169,44 @@ func (c *jobCard) fill(j app.Job) {
 	c.graph.SetRunning(!j.Done)
 	c.save.SetChecked(j.Saved, nil)
 	c.names.Text = namesLines(j)
+}
+
+// jobWhen says when a job ran, as of now: when it started while it
+// runs, and once it has stopped, when it started and how long it took.
+func jobWhen(j app.Job, now time.Time) string {
+	if j.Started.IsZero() {
+		return ""
+	}
+	at := clockAt(j.Started, now)
+	if j.Finished.IsZero() {
+		return "started " + at
+	}
+	return at + ", took " + took(j.Finished.Sub(j.Started))
+}
+
+// clockAt is t as a clock says it, with the day where that is not today.
+func clockAt(t, now time.Time) string {
+	day := func(t time.Time) time.Time { y, m, d := t.Date(); return time.Date(y, m, d, 0, 0, 0, 0, t.Location()) }
+	switch day(now).Sub(day(t)) {
+	case 0:
+		return t.Format("15:04")
+	case 24 * time.Hour:
+		return "yesterday " + t.Format("15:04")
+	}
+	return t.Format("2 Jan 15:04")
+}
+
+// took says how long d is, to the second, or to the minute past an hour.
+func took(d time.Duration) string {
+	switch {
+	case d < time.Second:
+		return "under a second"
+	case d < time.Minute:
+		return fmt.Sprintf("%d s", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%d min %d s", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // namesLines lists what a job works on, the one it is on marked and

@@ -101,12 +101,13 @@ func TestAFinishedCopyIsRepeatedAndSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.handle(RepeatJob{ID: a.st.Jobs[0].ID})
-	waitFor(t, a, "the repeat", func() bool { return len(a.st.Jobs) == 2 && a.st.Jobs[1].Done })
+	// The repeat is the newest, on top.
+	waitFor(t, a, "the repeat", func() bool { return len(a.st.Jobs) == 2 && a.st.Jobs[0].Done })
 	if got, _ := os.ReadFile(filepath.Join(into, "a.txt")); string(got) != "two" {
 		t.Fatalf("repeated, the copy holds %q", got)
 	}
-	a.handle(SaveCopy{ID: a.st.Jobs[0].ID, On: true})
-	if len(a.st.SavedCopies) != 1 || !a.st.Jobs[0].Saved {
+	a.handle(SaveCopy{ID: a.st.Jobs[1].ID, On: true})
+	if len(a.st.SavedCopies) != 1 || !a.st.Jobs[1].Saved {
 		t.Fatalf("saved, the list is %+v", a.st.SavedCopies)
 	}
 	// Gone from where it went, so the copy asks about nothing.
@@ -114,7 +115,7 @@ func TestAFinishedCopyIsRepeatedAndSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.handle(RunSavedCopy{Saved: a.st.SavedCopies[0]})
-	waitFor(t, a, "the saved copy", func() bool { return len(a.st.Jobs) == 3 && a.st.Jobs[2].Done })
+	waitFor(t, a, "the saved copy", func() bool { return len(a.st.Jobs) == 3 && a.st.Jobs[0].Done })
 	a.handle(ForgetCopy{Saved: a.st.SavedCopies[0]})
 	if len(a.st.SavedCopies) != 0 {
 		t.Fatalf("forgotten, the list is %+v", a.st.SavedCopies)
@@ -306,5 +307,32 @@ func TestASavedCopyThroughAWindowIsNamed(t *testing.T) {
 	named := func(id machines.ID) string { return map[machines.ID]string{"d1": "desk"}[id] }
 	if got := CopiedWhere(c, named); got != "/srv on db through desk → /tmp on this computer" {
 		t.Fatalf("the copy reads %q", got)
+	}
+}
+
+// The jobs pane lists the newest job first, each with when it started
+// and, once it has stopped, when that was.
+func TestTheNewestJobIsListedFirstWithWhenItRan(t *testing.T) {
+	from, into := t.TempDir(), t.TempDir()
+	for _, n := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(from, n), []byte(n), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := gunimtest.New(t, geom.Sz(400, 300), nil)
+	a := newApp(w.Client(), screen.NewShells())
+	a.ctx = t.Context()
+	local := vfs.NewLocal()
+	before := time.Now()
+	a.follow(jobs.Op{Kind: jobs.Copy, From: local, At: from, Names: []string{"a.txt"}, To: local, Into: into}, "first")
+	a.follow(jobs.Op{Kind: jobs.Copy, From: local, At: from, Names: []string{"b.txt"}, To: local, Into: into}, "second")
+	waitFor(t, a, "both copies to finish", func() bool { return len(a.st.Jobs) == 2 && a.st.Jobs[0].Done && a.st.Jobs[1].Done })
+	if a.st.Jobs[0].Title != "second" || a.st.Jobs[1].Title != "first" {
+		t.Fatalf("the jobs are listed %q, %q, want the newest first", a.st.Jobs[0].Title, a.st.Jobs[1].Title)
+	}
+	for _, j := range a.st.Jobs {
+		if j.Started.Before(before) || j.Finished.Before(j.Started) || j.Finished.After(time.Now()) {
+			t.Fatalf("%s started %v and finished %v", j.Title, j.Started, j.Finished)
+		}
 	}
 }

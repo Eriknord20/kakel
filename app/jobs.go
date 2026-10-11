@@ -59,6 +59,9 @@ type Job struct {
 	// Repeatable says a finished copy can be run again, and Saved that
 	// it is on the saved list.
 	Repeatable, Saved bool
+	// Started is when it started, and Finished when it stopped, zero
+	// while it runs.
+	Started, Finished time.Time
 }
 
 // KindJobs is the jobs pane.
@@ -96,8 +99,10 @@ type running struct {
 	sampled   int
 	lastBytes int64
 	lastAt    time.Time
-	// ended is set once its end has been reported.
-	ended bool
+	// ended is set once its end has been reported; started is when it
+	// started, and finished when it was first seen stopped.
+	ended             bool
+	started, finished time.Time
 	// quiet says a file manager window shows how the job goes, and how
 	// it ends: kakel's windows list it, and say nothing of its own.
 	quiet bool
@@ -121,7 +126,8 @@ func (a *app) followAsking(op jobs.Op, title string, from, to machines.ID, ask j
 	job := a.jobs.Start(a.ctx, op, jobs.Options{Ask: ask})
 	a.clearJobs(false)
 	a.jobSeq++
-	a.running = append(a.running, &running{id: "j" + itoa(a.jobSeq), job: job, title: title, op: op, from: from, to: to, quiet: quiet})
+	a.running = append(a.running, &running{id: "j" + itoa(a.jobSeq), job: job, title: title, op: op, from: from, to: to, quiet: quiet,
+		started: time.Now()})
 	if !a.watching {
 		a.watching = true
 		go a.watchJobs()
@@ -157,6 +163,9 @@ func (a *app) showJobs() bool {
 	for _, r := range a.running {
 		p := r.job.Progress()
 		r.sample(p)
+		if p.Done && r.finished.IsZero() {
+			r.finished = time.Now()
+		}
 		row := jobRow(r, p)
 		row.Saved = a.isSaved(r)
 		rows = append(rows, row)
@@ -182,6 +191,8 @@ func (a *app) showJobs() bool {
 			a.done()
 		}
 	}
+	// The newest on top.
+	slices.Reverse(rows)
 	a.st.Jobs = rows
 	a.jobLines = lines
 	a.showStatus()
@@ -193,7 +204,7 @@ func (a *app) showJobs() bool {
 
 // jobRow is a job as the pane shows it.
 func jobRow(r *running, p jobs.Progress) Job {
-	row := Job{ID: r.id, Title: r.title, Share: -1, Done: p.Done, Names: r.op.Names, Current: p.Current,
+	row := Job{ID: r.id, Title: r.title, Share: -1, Done: p.Done, Names: r.op.Names, Current: p.Current, Started: r.started, Finished: r.finished,
 		Speeds: slices.Clone(r.speeds), Sampled: r.sampled, Repeatable: p.Done && r.op.Kind == jobs.Copy, Machine: r.to, Kind: jobKind(r.op.Kind)}
 	// Filed under the machine it writes to, unless that is this one: a
 	// copy down from a server stays under the server, where the files
