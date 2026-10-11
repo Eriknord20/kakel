@@ -3,6 +3,8 @@ package app
 import (
 	"errors"
 	"log"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -51,14 +53,21 @@ type fmPane struct {
 }
 
 // newFilePane opens a file manager pane on fsys, the files of machine, at
-// path or at home, where at says.
+// path or at home, where at says. A file on this computer opens its
+// folder, with the file selected.
 func (a *app) newFilePane(machine machines.ID, fsys filemanager.FS, path string, at Placement) error {
 	if a.files == nil {
 		return errNoFileManager
 	}
+	pick := ""
+	if machine == machines.Local {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			path, pick = filepath.Dir(path), filepath.Base(path)
+		}
+	}
 	a.next++
 	id := "p" + itoa(a.next)
-	fw, err := a.files.NewPane(a.fileManagerOptions(fsys, path), filemanager.PaneHost{
+	fw, err := a.files.NewPane(a.fileManagerOptions(fsys, path, pick), filemanager.PaneHost{
 		ID: FilePaneViews(id),
 		// Its menus join kakel's, as the window shows them.
 		HostMenus: true,
@@ -122,11 +131,11 @@ func (a *app) later(fn func()) {
 }
 
 // fileManagerOptions are the options a file manager opens with on fsys,
-// at path or at home.
-func (a *app) fileManagerOptions(fsys filemanager.FS, path string) filemanager.Options {
+// at path or at home, with the name pick selected.
+func (a *app) fileManagerOptions(fsys filemanager.FS, path, pick string) filemanager.Options {
 	a.notePlaces()
 	return filemanager.Options{
-		FS: fsys, Dir: path, Name: ProgramName, PrefsPath: fileManagerPrefs(),
+		FS: fsys, Dir: path, Select: pick, Name: ProgramName, PrefsPath: fileManagerPrefs(),
 		Places: a.fileManagerPlaces, Visit: a.visitPlace, Favourites: a.favStore(),
 		Transfer: a.transferFiles, FSName: a.fsName,
 		// A zip's password can come from the secrets, and go into them.

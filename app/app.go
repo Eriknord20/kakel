@@ -942,9 +942,10 @@ func (a *app) run(ctx context.Context) error {
 		a.letWindowGo(first)
 	case a.opts.filesSet:
 		// Started for a folder, as Windows starts it for one opened
-		// anywhere: the first window holds a file manager pane there.
+		// anywhere: the first window holds a file manager pane there,
+		// on the file Windows was likely asked to show in it.
 		a.showTray()
-		if err := a.filePaneOn(machines.Local, a.opts.files, Placement{}, true); err != nil {
+		if err := a.filePaneOn(machines.Local, shellPick(recentFolder(), a.opts.files), Placement{}, true); err != nil {
 			a.failed("Couldn't open the folder", err.Error())
 			a.openFirstOrSay()
 		}

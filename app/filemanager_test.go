@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -142,6 +143,18 @@ func TestAFolderOpenedAnywhereOpensInTheFileManager(t *testing.T) {
 	p := a.st.Panes[len(a.st.Panes)-1]
 	if files.opened[0].Dir != filepath.FromSlash("/srv/data") || p.Kind != KindFileManager || a.ownerOf(p.ID) != a.cur || len(a.panesIn(a.cur)) != 1 {
 		t.Fatalf("handed a folder, kakel opened %+v in a window of %d panes", files.opened, len(a.panesIn(a.cur)))
+	}
+
+	// A file opens its folder, with the file selected.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "download.zip")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.handover(single.Handover{Args: []string{"-files", file}})
+	waitFor(t, a, "a second window opens", func() bool { return windows.Load() == 2 && len(files.opened) == 2 })
+	if o := files.opened[1]; o.Dir != dir || o.Select != "download.zip" {
+		t.Fatalf("handed a file, kakel opened %q selecting %q", o.Dir, o.Select)
 	}
 }
 

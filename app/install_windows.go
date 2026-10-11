@@ -3,6 +3,8 @@ package app
 import (
 	"os"
 
+	"golang.org/x/sys/windows"
+
 	"github.com/marrasen/kakel/internal/conpty"
 )
 
@@ -15,4 +17,13 @@ func removeConPTY() {
 	if dir, err := conpty.Dir(); err == nil {
 		_ = os.RemoveAll(dir)
 	}
+}
+
+// recentFolder is the folder of the user's Recent items, or "".
+func recentFolder() string {
+	dir, err := windows.KnownFolderPath(windows.FOLDERID_Recent, 0)
+	if err != nil {
+		return ""
+	}
+	return dir
 }

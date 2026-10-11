@@ -103,7 +103,7 @@ func (a *app) startFolder(machine machines.ID, path string) string {
 
 // openFolder opens a window of its own holding a file manager pane on
 // this computer's folder dir, or home for "", as a folder opened anywhere
-// asks once kakel opens them.
+// asks once kakel opens them. A file opens its folder, with it selected.
 func (a *app) openFolder(dir string) {
 	if err := a.openFileManager(machines.Local, dir); err != nil {
 		a.failed("Couldn't open the folder", err.Error())

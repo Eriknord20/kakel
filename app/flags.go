@@ -83,7 +83,8 @@ func ParseOptions(args []string) (Options, error) {
 		"say each second how many frames were drawn, on standard error")
 	fs.BoolVar(&o.tray, "tray", false, "start in the tray, with no window, as kakel does with the computer")
 	fs.StringVar(&o.files, "files", "",
-		"open this folder in a file manager window, in the kakel already running if there is one; empty for home")
+		"open this folder in a file manager window, in the kakel already running if there is one; empty for home,"+
+			" and a file opens its folder with the file selected")
 	fs.BoolVar(&o.quit, "quit", false, "end the kakel running, asking first as Exit does while anything is open")
 	fs.BoolVar(&o.launcher, "launcher", false,
 		"open the launcher, in the kakel already running if there is one;"+

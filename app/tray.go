@@ -353,7 +353,7 @@ func (a *app) handover(h single.Handover) {
 		a.openLauncher()
 		return
 	case err == nil && o.filesSet:
-		a.openFolder(o.files)
+		a.openFolder(shellPick(recentFolder(), o.files))
 		return
 	case err == nil && o.quit:
 		a.askToQuit()
