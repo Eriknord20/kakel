@@ -272,8 +272,14 @@ func (a *app) launchMachines() []LaunchMachine {
 	actions := func(m machines.ID) []LaunchAction {
 		out := []LaunchAction{{ID: "terminal", Title: "Terminal"}, {ID: "files", Title: "Files"}}
 		if m == machines.Local {
-			for _, sh := range a.st.Shells {
-				out = append(out, LaunchAction{ID: "shell:" + sh.ID, Title: sh.Title})
+			// Each shell by its name, the one a new terminal starts
+			// first: "Terminal" would not say which.
+			if shells := a.shellsDefaultFirst(); len(shells) > 0 {
+				out = out[:0]
+				for _, sh := range shells {
+					out = append(out, LaunchAction{ID: "shell:" + sh.ID, Title: sh.Title})
+				}
+				out = append(out, LaunchAction{ID: "files", Title: "Files"})
 			}
 			return out
 		}
@@ -317,21 +323,29 @@ func (a *app) launchMachines() []LaunchMachine {
 // commands, and kakel's own windows.
 func (a *app) launchThings(ms []LaunchMachine) []LaunchThing {
 	var out []LaunchThing
-	for _, sh := range a.st.Shells {
-		also := []string{sh.ID, "shell", "terminal"}
+	for _, sh := range a.shellsDefaultFirst() {
+		also := []string{sh.ID, "shell", "terminal", "new terminal", "terminal on this computer"}
 		if strings.HasPrefix(sh.ID, "wsl:") {
 			also = append(also, "wsl", "linux")
 		}
-		out = append(out, LaunchThing{Title: sh.Title, Note: "This computer", Also: also, Kind: "terminal", Action: "shell:" + sh.ID})
+		note := "This computer"
+		if sh.ID == a.defaultShell() {
+			note += " · default"
+		}
+		out = append(out, LaunchThing{Title: sh.Title, Note: note, Also: also, Kind: "terminal", Action: "shell:" + sh.ID})
 		if sh.Folder != "" {
 			out = append(out, LaunchThing{Title: "Files in " + sh.Title, Note: "This computer", Also: []string{"wsl", "folder", "explorer"},
 				Kind: "files", Action: "files:" + sh.Folder})
 		}
 	}
 	for _, m := range ms {
-		out = append(out,
-			LaunchThing{Title: "Terminal on " + m.Name, Note: m.Note, Also: []string{"shell", "ssh", "console"}, Kind: "terminal", Machine: m.ID, Action: "terminal"},
-			LaunchThing{Title: "Files on " + m.Name, Note: m.Note, Also: []string{"folder", "browse", "explorer", "sftp"}, Kind: "files", Machine: m.ID, Action: "files"})
+		// This computer's terminals are its shells, by name, above.
+		if m.ID != machines.Local || len(a.st.Shells) == 0 {
+			out = append(out, LaunchThing{Title: "Terminal on " + m.Name, Note: m.Note, Also: []string{"shell", "ssh", "console", "new terminal"},
+				Kind: "terminal", Machine: m.ID, Action: "terminal"})
+		}
+		out = append(out, LaunchThing{Title: "Files on " + m.Name, Note: m.Note,
+			Also: []string{"folder", "browse", "explorer", "sftp", "file manager", "new file manager"}, Kind: "files", Machine: m.ID, Action: "files"})
 		if slices.ContainsFunc(m.Actions, func(x LaunchAction) bool { return x.ID == "log" }) {
 			out = append(out, LaunchThing{Title: "Connection Log of " + m.Name, Note: m.Note, Also: []string{"log", "account"}, Kind: "log", Machine: m.ID, Action: "log"})
 		}
@@ -366,6 +380,10 @@ func (a *app) launchThings(ms []LaunchMachine) []LaunchThing {
 		LaunchThing{Title: "Machines", Note: "kakel", Also: []string{"servers", "connections"}, Kind: "servers", Action: "app:servers"},
 		LaunchThing{Title: "Secrets", Note: "kakel", Also: []string{"passwords", "vault"}, Kind: "secrets", Action: "app:secrets"},
 		LaunchThing{Title: "New Window", Note: "kakel", Also: []string{"terminal"}, Kind: "window", Action: "app:window"},
+		LaunchThing{Title: "Settings", Note: "kakel", Also: []string{"preferences", "options", "theme", "font", "updates", "beta"},
+			Kind: "settings", Action: "app:settings"},
+		LaunchThing{Title: "About kakel", Note: "kakel", Also: []string{"version", "changelog", "what's new", "check for updates"},
+			Kind: "about", Action: "app:about"},
 	)
 }
 
@@ -432,6 +450,10 @@ func (a *app) launchOn(in Launch) {
 		a.showServers()
 	case in.Action == "app:secrets":
 		a.showSecretsPane(func(string) {})
+	case in.Action == "app:settings":
+		a.handle(ShowSettings{})
+	case in.Action == "app:about":
+		a.handle(ShowAbout{})
 	case in.Action == "app:window":
 		a.newWindow(func() { a.handle(NewTerminal{}) })
 	case in.Action == "files":

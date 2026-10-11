@@ -147,10 +147,11 @@ type Window struct {
 	// windows connected to, as last published.
 	savedCommands []settings.SavedCommand
 	remoteWindows []app.RemoteWindow
-	// shellChoices are the shells here, and chosenShell the one kept,
-	// as last published.
+	// shellChoices are the shells here, chosenShell the one kept, and
+	// defaultShell the one a new terminal starts, as last published.
 	shellChoices []app.ShellChoice
 	chosenShell  string
+	defaultShell string
 	// termProgram is what new shells are told the terminal is called,
 	// and launcherKey the launcher's key, as last published.
 	termProgram string
@@ -1257,37 +1258,51 @@ func (w *Window) servers(saved []remote.Host) {
 		}
 	}
 	for _, m := range w.accounts {
-		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Connection Log for " + w.nameOf(m), Icon: icon.ScrollText})
+		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Connection Log of " + w.nameOf(m), Icon: icon.ScrollText,
+			Also: []string{"log", "account"}})
 		w.paletteIDs = append(w.paletteIDs, "conn.log."+w.cmdName(m))
 	}
-	// Every machine by name: a terminal there, its files, and each
-	// folder saved for it.
-	for _, m := range w.machines() {
+	// Every machine by name, as the launcher words them, the saved
+	// servers not connected to as well: a terminal there, its files, and
+	// each folder saved for it. This computer's terminals are its shells,
+	// by name, below.
+	for _, m := range w.paletteMachines() {
 		where := w.nameOf(m)
 		if m == "" {
-			where = "This Computer"
+			where = "This computer"
 		}
-		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "New Terminal on " + where, Icon: icon.SquareTerminal},
-			widget.PaletteItem{Title: "New File Manager on " + where, Icon: icon.Folder})
-		w.paletteIDs = append(w.paletteIDs, "conn.terminal."+w.cmdName(m), "conn.files."+w.cmdName(m))
+		if m != "" || len(w.shellChoices) == 0 {
+			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Terminal on " + where, Icon: icon.SquareTerminal,
+				Also: []string{"new terminal", "shell", "ssh"}})
+			w.paletteIDs = append(w.paletteIDs, "conn.terminal."+w.cmdName(m))
+		}
+		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Files on " + where, Icon: icon.Folder,
+			Also: []string{"new file manager", "file manager", "folder", "browse", "explorer"}})
+		w.paletteIDs = append(w.paletteIDs, "conn.files."+w.cmdName(m))
 		for i, f := range w.foldersOn(m) {
-			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "New File Manager at " + f.Label() + " on " + where, Icon: icon.Folder})
+			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: f.Label(), Detail: where, Icon: icon.Folder,
+				Also: []string{"files", "favourite", "new file manager", f.Path}})
 			w.paletteIDs = append(w.paletteIDs, "conn.files."+w.cmdName(m)+"."+strconv.Itoa(i+1))
 		}
 	}
-	// With more than one shell here, a terminal with any of them, and
-	// which new terminals start.
-	if len(w.shellChoices) > 1 {
+	// Each shell here by its name, the one a new terminal starts said;
+	// with more than one, which new terminals start.
+	if len(w.shellChoices) > 0 {
 		ids := w.shellIDs()
 		for i, s := range w.shellChoices {
-			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "New " + s.Title, Icon: icon.SquareTerminal, Hint: hint(ids[i])})
+			where := "This computer"
+			if s.ID == w.defaultShell {
+				where += " · default"
+			}
+			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: s.Title, Detail: where, Icon: icon.SquareTerminal, Hint: hint(ids[i]),
+				Also: []string{"new " + s.Title, "new terminal", "terminal", "shell"}})
 			w.paletteIDs = append(w.paletteIDs, ids[i])
-			if s.ID != w.chosenShell {
+			if len(w.shellChoices) > 1 && s.ID != w.chosenShell {
 				w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Start " + s.Title + " in New Terminals"})
 				w.paletteIDs = append(w.paletteIDs, "shell.pick."+s.ID)
 			}
 		}
-		if w.chosenShell != "" {
+		if len(w.shellChoices) > 1 && w.chosenShell != "" {
 			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Start The Default Shell in New Terminals"})
 			w.paletteIDs = append(w.paletteIDs, "shell.pick.")
 		}
@@ -2081,9 +2096,10 @@ func (w *Window) Update(st app.State, u *gunim.UI) {
 		w.servers(w.saved)
 	}
 	w.setSavedCommands(st.SavedCommands)
-	if !slices.Equal(st.Shells, w.shellChoices) || st.ChosenShell != w.chosenShell ||
+	if !slices.Equal(st.Shells, w.shellChoices) || st.ChosenShell != w.chosenShell || st.DefaultShell != w.defaultShell ||
 		st.ThisComputer.StartFolder != w.thisComputer.StartFolder || !slices.Equal(st.Favourites, w.favourites) {
 		w.shellChoices, w.chosenShell, w.thisComputer, w.favourites = st.Shells, st.ChosenShell, st.ThisComputer, st.Favourites
+		w.defaultShell = st.DefaultShell
 		w.servers(w.saved)
 	}
 	w.echoFor(st, u)
@@ -3463,6 +3479,19 @@ func (w *Window) machines() []machines.ID {
 	out = append(out, w.connected...)
 	for _, rw := range w.remoteWindows {
 		out = append(out, rw.Name)
+	}
+	return out
+}
+
+// paletteMachines are the machines the palette opens things on, as the
+// launcher does: those of machines, then each saved server not among
+// them, which is connected to first.
+func (w *Window) paletteMachines() []machines.ID {
+	out := w.machines()
+	for _, h := range w.saved {
+		if m := machines.ID(h.ID); !h.Window && !slices.Contains(out, m) {
+			out = append(out, m)
+		}
 	}
 	return out
 }

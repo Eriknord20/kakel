@@ -2,10 +2,14 @@ package view
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/marrasen/kakel/app"
+	"github.com/marrasen/kakel/machines"
+	"github.com/marrasen/kakel/remote"
 
+	"github.com/marrasen/gunim/match"
 	"github.com/marrasen/gunim/widget"
 )
 
@@ -66,5 +70,51 @@ func TestNextPaneGoesInTheSidebarsOrder(t *testing.T) {
 	}
 	if got.Pane != "p3" {
 		t.Fatalf("Next Pane from one went to %s, want three, the next on this computer", got.Pane)
+	}
+}
+
+// The palette words what it opens as the launcher does, and finds it by
+// the same words: "files on skylake" finds the files of a server saved
+// and not connected to, and each shell here goes by its name, the one a
+// new terminal starts said to be the default.
+func TestThePaletteWordsWhatItOpensAsTheLauncherDoes(t *testing.T) {
+	win, _, publish := windowStage(t)
+	publish(app.State{Saved: []remote.Host{{ID: "sky", Name: "skylake", Address: "10.0.0.5"}},
+		Machines:     []machines.Info{{ID: "sky", Name: "skylake"}},
+		Shells:       []app.ShellChoice{{ID: "cmd", Title: "Command Prompt"}, {ID: "pwsh", Title: "PowerShell 7"}},
+		DefaultShell: "pwsh"})
+	items := make([]match.Item, len(win.palette.Items))
+	for i, it := range win.palette.Items {
+		items[i] = match.Item{Title: it.Title, Also: it.Also}
+	}
+	best := func(q string) widget.PaletteItem {
+		t.Helper()
+		found := match.Rank(items, q)
+		if len(found) == 0 {
+			t.Fatalf("%q finds nothing", q)
+		}
+		return win.palette.Items[found[0].Index]
+	}
+	if it := best("files on skylake"); it.Title != "Files on skylake" {
+		t.Fatalf("files on skylake finds %q first", it.Title)
+	}
+	if it := best("terminal on skylake"); it.Title != "Terminal on skylake" {
+		t.Fatalf("terminal on skylake finds %q first", it.Title)
+	}
+	if it := best("new file manager"); it.Title != "New File Manager" && !strings.HasPrefix(it.Title, "Files on") {
+		t.Fatalf("new file manager finds %q first", it.Title)
+	}
+	for _, it := range win.palette.Items {
+		if strings.HasPrefix(it.Title, "Terminal on This computer") || strings.HasPrefix(it.Title, "New Terminal on") {
+			t.Fatalf("the palette still offers %q", it.Title)
+		}
+	}
+	i := slices.IndexFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "PowerShell 7" })
+	if i < 0 || win.palette.Items[i].Detail != "This computer · default" {
+		t.Fatalf("the default shell is offered as %+v", win.palette.Items[max(i, 0)])
+	}
+	if j := slices.IndexFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "Command Prompt" }); j < 0 ||
+		win.palette.Items[j].Detail != "This computer" {
+		t.Fatal("another shell is said to be the default, or is missing")
 	}
 }

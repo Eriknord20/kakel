@@ -172,10 +172,16 @@ func TestTheLauncherOffersShellsFilesAndWindows(t *testing.T) {
 	for _, th := range things {
 		titles[th.Title] = th
 	}
-	for _, want := range []string{"Command Prompt", "Ubuntu (WSL)", "Files in Ubuntu (WSL)", "Terminal on This computer", "Files on This computer", "Machines", "Secrets", "New Window"} {
+	for _, want := range []string{"Command Prompt", "Ubuntu (WSL)", "Files in Ubuntu (WSL)", "Files on This computer", "Machines", "Secrets",
+		"New Window", "Settings", "About kakel"} {
 		if _, ok := titles[want]; !ok {
 			t.Fatalf("the launcher offers no %q among %v", want, things)
 		}
+	}
+	// This computer's terminals go by their shells' names: no
+	// "Terminal" that does not say which.
+	if _, ok := titles["Terminal on This computer"]; ok {
+		t.Fatal("the launcher offers a Terminal on This computer besides its shells")
 	}
 	if th := titles["Code"]; th.Action != "files:/home/me/src" || th.Note != "This computer" || !slices.Contains(th.Also, "/home/me/src") {
 		t.Fatalf("a favourite is offered as %+v", th)
@@ -189,6 +195,33 @@ func TestTheLauncherOffersShellsFilesAndWindows(t *testing.T) {
 	}
 	if ms := a.launchMachines(); ms[0].Default != 0 {
 		t.Fatal("opening Machines became what Enter opens on this computer")
+	}
+}
+
+// The shell a new terminal starts is said, and comes first: among the
+// things found, and among what can be opened on this computer, which
+// opens it with Enter.
+func TestTheLauncherSaysWhichShellIsTheDefault(t *testing.T) {
+	a, _, _ := twoWindowApp(t)
+	a.st.Shells = []ShellChoice{{ID: "cmd", Title: "Command Prompt"}, {ID: "pwsh", Title: "PowerShell 7"}}
+	a.ownShell = "cmd"
+	a.st.ChosenShell = "pwsh"
+	things := a.launchThings(a.launchMachines())
+	if things[0].Title != "PowerShell 7" || things[0].Note != "This computer · default" || things[1].Note != "This computer" {
+		t.Fatalf("the shells are offered as %+v, %+v", things[0], things[1])
+	}
+	local := a.launchMachines()[0]
+	var titles []string
+	for _, x := range local.Actions {
+		titles = append(titles, x.Title)
+	}
+	if !slices.Equal(titles, []string{"PowerShell 7", "Command Prompt", "Files"}) || local.Default != 0 {
+		t.Fatalf("this computer offers %v, Enter opening %d", titles, local.Default)
+	}
+	// With none kept, the user's own.
+	a.st.ChosenShell = ""
+	if things := a.launchThings(a.launchMachines()); things[0].Title != "Command Prompt" || things[0].Note != "This computer · default" {
+		t.Fatalf("with no shell kept, the first is %+v", things[0])
 	}
 }
 
@@ -251,4 +284,17 @@ func TestFilesFromTheTrayOpenInTheWindowWorkedIn(t *testing.T) {
 	if p := a.st.Panes[len(a.st.Panes)-1]; p.Kind != KindFileManager || files.opened[1].Dir != "/tmp" || a.ownerOf(p.ID) == nil || a.ownerOf(p.ID).gone {
 		t.Fatalf("with no window, the files opened as %+v at %q", p, files.opened[1].Dir)
 	}
+}
+
+// Settings and About open from the launcher, as from a window's palette.
+func TestTheLauncherOpensSettingsAndAbout(t *testing.T) {
+	a, _, _ := twoWindowApp(t)
+	wins := &fakeUpdateWindows{}
+	a.updateWins = wins
+	a.handleLaunch(Launch{Action: "app:settings"})
+	if a.paneOf(KindSettings) == "" {
+		t.Fatal("Settings did not open")
+	}
+	a.handleLaunch(Launch{Action: "app:about"})
+	waitFor(t, a, "the window about kakel", func() bool { return wins.seen(func() bool { return len(wins.abouts) == 1 }) })
 }

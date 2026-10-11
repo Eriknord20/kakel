@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/marrasen/kakel/machines"
+	"github.com/marrasen/kakel/session"
 	shellfind "github.com/marrasen/kakel/shells"
 )
 
@@ -47,6 +48,12 @@ func (a *app) scanShells() {
 				a.failed("Couldn't list the shells here", err.Error())
 			}
 			a.found, a.scanned = found, err == nil
+			a.ownShell = ""
+			if argv, err := session.DefaultShell(); err == nil {
+				if sh, ok := shellfind.Running(found, argv); ok {
+					a.ownShell = sh.ID
+				}
+			}
 			// Panes that opened before the shells were known, such as
 			// the first, are named again: "Command Prompt", not the
 			// path its program calls itself by.
@@ -72,6 +79,27 @@ func (a *app) scanShells() {
 			}
 		}
 	}()
+}
+
+// defaultShell is the ID of the shell a new terminal here starts: the
+// one kept, or the user's own; "" where neither is among the shells
+// found.
+func (a *app) defaultShell() string {
+	if a.st.ChosenShell != "" {
+		return a.st.ChosenShell
+	}
+	return a.ownShell
+}
+
+// shellsDefaultFirst are the shells here, the one a new terminal starts
+// first.
+func (a *app) shellsDefaultFirst() []ShellChoice {
+	out := slices.Clone(a.st.Shells)
+	if i := slices.IndexFunc(out, func(s ShellChoice) bool { return s.ID == a.defaultShell() }); i > 0 {
+		def := out[i]
+		out = slices.Insert(slices.Delete(out, i, i+1), 0, def)
+	}
+	return out
 }
 
 // localShell is the command a new terminal here starts, when the pane

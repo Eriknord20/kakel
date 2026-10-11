@@ -155,6 +155,10 @@ type State struct {
 	Dropped     []machines.ID
 	Shells      []ShellChoice
 	ChosenShell string
+	// DefaultShell is the ID of the shell a new terminal here starts:
+	// ChosenShell, or the user's own as found among Shells; "" where
+	// that is not known.
+	DefaultShell string
 	// ThisComputer is this computer's settings: where a new terminal
 	// starts.
 	ThisComputer ThisComputer
@@ -765,6 +769,8 @@ type app struct {
 	found         []shellfind.Shell
 	scanned       bool
 	shellGoneSaid bool
+	// ownShell is the ID of the user's own shell among those found.
+	ownShell string
 	// registerThemes names themes to the window, for reading them
 	// again.
 	registerThemes func([]look.Themed)
@@ -1269,6 +1275,7 @@ func (a *app) publish() {
 	st.Windows = slices.Clone(a.st.Windows)
 	st.SavedCommands = slices.Clone(a.st.SavedCommands)
 	st.Shells = slices.Clone(a.st.Shells)
+	st.DefaultShell = a.defaultShell()
 	st.SavedCopies = slices.Clone(a.st.SavedCopies)
 	st.Connected = a.machines.Connected()
 	st.Dialing = a.machines.Dialing()
