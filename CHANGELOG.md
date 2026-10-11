@@ -7,6 +7,21 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.0-beta.21
+
+### Changed
+
+**A failed copy says why, and offers Retry.** "The copy stopped" and
+the file manager's other failures now say in a sentence which item
+failed and why, such as "app.exe wasn't put in place: access was
+denied. It may be read-only or open in another program, or, if it is a
+program, running." The system's own error follows, small, to copy.
+Retry starts the operation again for what is left: the items a copy or
+a move didn't bring, or the ones a delete didn't reach.
+
+**The Jobs pane lists the newest job first, and says when each ran:**
+"17:02, took 4 s", or "started 17:02" while it runs.
+
 ## v0.12.0-beta.20
 
 ### Changed
