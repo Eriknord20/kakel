@@ -37,6 +37,8 @@ github.com/marrasen/go-vte v1.0.11-gt.3 h1:yKLOspd41Y1YNIS4nSkfr4vOOXek0TMB+jZn1
 github.com/marrasen/go-vte v1.0.11-gt.3/go.mod h1:pJkkHdWHRIJ/x31igKIKlCukt7d/1HLOklByiKZ0kNI=
 github.com/marrasen/gunim v0.0.0-20261010142622-134bf28a6b88 h1:75Js72mpKqqPgOzLRxa2eEGACIsM9tylvGdLBBFZGE4=
 github.com/marrasen/gunim v0.0.0-20261010142622-134bf28a6b88/go.mod h1:T1ceVaYYVmiWNA1E3BcJg3WqfRG+JkpC4+Qe0Uze3zM=
+github.com/marrasen/gunim v0.0.0-20261011091439-3aeef64be30a h1:E20VHz6HtBUEzpZAntIafUnjQkVniQCrG6K/c0BHHe8=
+github.com/marrasen/gunim v0.0.0-20261011091439-3aeef64be30a/go.mod h1:T1ceVaYYVmiWNA1E3BcJg3WqfRG+JkpC4+Qe0Uze3zM=
 github.com/marrasen/oto/v3 v3.5.1-gunim.5 h1:plT8vA7YvC94GQ5FgcVFntrnSoN7DpRQOeauDBqjA8Y=
 github.com/marrasen/oto/v3 v3.5.1-gunim.5/go.mod h1:9Kr9SPGrjo18cdaKxjd2kaf99e1Ln2CUKgbJP5TpiBU=
 github.com/mewkiz/flac v1.0.14 h1:hyRGAM8NCKznoPmIi9zz2jyO+nfmxY2ErqBnHZ+gxh4=
