@@ -68,6 +68,9 @@ type Ask struct {
 	// failure, what went wrong with the last answer.
 	Facts   []AskFact
 	Problem string
+	// Small are lines said small and faint under Text, as the two
+	// items a replace question compares.
+	Small []string
 	// win is the window it is asked in, and alone says it is asked in a
 	// window of its own instead.
 	win   int

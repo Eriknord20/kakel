@@ -490,13 +490,7 @@ func (f *fmAsker) Overwrite(ctx context.Context, c jobs.Conflict) (jobs.Choice, 
 	if all != nil && (*all != filemanager.ChoiceReplace || sameKind) {
 		return f.choice(c, *all), nil
 	}
-	coming := "a folder"
-	if !c.Want.IsDir() {
-		coming = words.Size(c.Want.Size)
-	}
-	if !c.Want.Mod.IsZero() {
-		coming += ", modified " + c.Want.Mod.Format("2 Jan 2006 15:04")
-	}
+	coming := filemanager.ItemFacts(c.Want.Size, c.Want.IsDir(), c.Want.Mod)
 	choice, forAll, err := f.p.Clash(ctx, c.Path, coming, sameKind)
 	if err != nil {
 		// Stopped there, as the user asked: a stop, not a failure.

@@ -1083,6 +1083,11 @@ func askDialog(q app.Ask, from gunim.Node) *widget.Dialog {
 		}
 		form.Add("", note)
 	}
+	for _, line := range q.Small {
+		l := widget.NewLabel(line)
+		l.Size, l.Color = smallText, look.Faint
+		form.Add("", l)
+	}
 	// What it is about: each a name in bold, with a note under it.
 	for _, fact := range q.Facts {
 		name := widget.NewLabel(fact.Name)

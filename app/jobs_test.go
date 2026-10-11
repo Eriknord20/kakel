@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -236,32 +237,39 @@ func TestRepeatPressedAgainWhileItsMachineOpensDoesNothingMore(t *testing.T) {
 	}
 }
 
-// Enter on "Replace notes.txt?" leaves the file there alone: it is the
-// first choice, which the dialog's Enter gives.
-func TestEnterOnTheOverwriteQuestionLeavesTheFile(t *testing.T) {
+// The replace question asks as the file manager's does: Replace
+// “notes.txt”?, what the existing and the new one are, Apply to all, and
+// Skip, Keep Both, Stop and Replace, with the keyboard on Stop. Each
+// answer is what the job is told; Keep Both gives a free name beside.
+func TestTheReplaceQuestionAsksAsTheFileManagerDoes(t *testing.T) {
 	w := gunimtest.New(t, geom.Sz(400, 300), nil)
 	a := newApp(w.Client(), screen.NewShells())
 	a.ctx = t.Context()
 	local := vfs.NewLocal()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
 	for _, tc := range []struct {
 		answer string
+		yes    bool
 		want   jobs.What
-	}{{"", jobs.Skip}, {"Replace", jobs.Replace}} {
+	}{{"Skip", true, jobs.Skip}, {"Replace", true, jobs.Replace}, {"Keep Both", true, jobs.Rename}, {"", false, jobs.Stop}} {
 		got := make(chan jobs.Choice, 1)
 		go func() {
-			c, _ := overwriteAsker{a}.Overwrite(t.Context(), jobs.Conflict{To: local, Path: "/tmp/notes.txt"})
+			c, _ := (&overwriteAsker{a: a}).Overwrite(t.Context(), jobs.Conflict{To: local, Path: path,
+				Have: vfs.Entry{Size: 219}, Want: vfs.Entry{Size: 300}})
 			got <- c
 		}()
 		waitFor(t, a, "the question", func() bool { return len(a.st.Asks) == 1 })
 		q := a.st.Asks[0]
-		pick := tc.answer
-		if pick == "" {
-			// What Enter gives: the first choice.
-			pick = q.Choose[0]
+		if q.Title != "Replace “notes.txt”?" || q.Text != filepath.Base(dir)+" already has a file named “notes.txt”." ||
+			!slices.Equal(q.Small, []string{"Existing: 219 bytes", "New: 300 bytes"}) || q.Also != "Apply to all" || q.No != "Stop" || !q.Careful ||
+			!slices.Equal(q.Choose, []string{"Replace", "Skip", "Keep Both"}) {
+			t.Fatalf("the question reads %+v", q)
 		}
-		a.handle(AskAnswered{ID: q.ID, Yes: true, Answers: []string{pick, ""}})
-		if c := <-got; c.What != tc.want {
-			t.Fatalf("answered %q, the job was told %v, want %v", pick, c.What, tc.want)
+		a.handle(AskAnswered{ID: q.ID, Yes: tc.yes, Answers: []string{tc.answer, ""}})
+		c := <-got
+		if c.What != tc.want || tc.want == jobs.Rename && c.Name != "notes (2).txt" {
+			t.Fatalf("answered %q, the job was told %+v, want %v", tc.answer, c, tc.want)
 		}
 	}
 }

@@ -125,7 +125,7 @@ func typedOn(p string) string {
 // ended made a second notice for one drop, or one where the typed path
 // said it already.
 func (a *app) followDrop(op jobs.Op, title string, machine machines.ID) *jobs.Job {
-	return a.followAsking(op, title, "", machine, overwriteAsker{a}, true)
+	return a.followAsking(op, title, "", machine, &overwriteAsker{a: a}, true)
 }
 
 // sameDir reports whether two paths name one folder on this machine.

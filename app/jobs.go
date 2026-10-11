@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marrasen/kakel/machines"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/marrasen/kakel/jobs"
 	"github.com/marrasen/kakel/vfs"
+
+	"github.com/marrasen/gunim/filemanager"
 )
 
 // Copying, moving and deleting files, with kakel's jobs package, on the
@@ -114,7 +117,7 @@ func (a *app) follow(op jobs.Op, title string) { a.followOn(op, title, "", "") }
 // followOn is follow, for a job between the machines from and to, which
 // a repeat opens again.
 func (a *app) followOn(op jobs.Op, title string, from, to machines.ID) *jobs.Job {
-	return a.followAsking(op, title, from, to, overwriteAsker{a}, false)
+	return a.followAsking(op, title, from, to, &overwriteAsker{a: a}, false)
 }
 
 // followAsking is followOn, asking ask about names that are taken, and
@@ -321,18 +324,42 @@ func (a *app) showJobsPane() {
 	a.addPane(Pane{ID: "p" + itoa(a.next), Title: "Jobs", Kind: KindJobs}, nil, Placement{})
 }
 
-// overwriteAsker asks the user about a name that is already there.
-type overwriteAsker struct{ a *app }
+// overwriteAsker asks the user about a name that is already there, as
+// the file manager's own dialog does, in its words: Replace “name”?,
+// what each one is, Apply to all, and Skip, Keep Both, Stop or Replace.
+// Keep Both for all is kept here, as each item takes a name of its own.
+type overwriteAsker struct {
+	a        *app
+	mu       sync.Mutex
+	keepBoth bool
+}
 
 // Overwrite implements [jobs.Ask].
-func (q overwriteAsker) Overwrite(ctx context.Context, c jobs.Conflict) (jobs.Choice, error) {
-	name := vfs.Base(c.To, c.Path)
-	text := fmt.Sprintf("%s is already in %s: %s, from %s. The one arriving is %s, from %s.",
-		name, vfs.Dir(c.To, c.Path), describe(c.Have), c.Have.Mod.Format("2006-01-02 15:04"),
-		describe(c.Want), c.Want.Mod.Format("2006-01-02 15:04"))
-	// Leave It first, so Enter is the choice that loses nothing.
-	ans, err := q.a.ask(ctx, Ask{Title: "Replace " + name + "?", Text: text,
-		Choose: []string{"Leave It", "Replace"}, FirstIsSafe: true, Also: "Do the same for the rest", No: "Stop"})
+func (q *overwriteAsker) Overwrite(ctx context.Context, c jobs.Conflict) (jobs.Choice, error) {
+	q.mu.Lock()
+	keepBoth := q.keepBoth
+	q.mu.Unlock()
+	if keepBoth {
+		return jobs.Choice{What: jobs.Rename, Name: vfs.Base(c.To, nameBeside(c.To, c.Path, c.Want.IsDir()))}, nil
+	}
+	name, where := vfs.Base(c.To, c.Path), vfs.Base(c.To, vfs.Dir(c.To, c.Path))
+	if where == "" {
+		where = vfs.Dir(c.To, c.Path)
+	}
+	kind := "a file"
+	if c.Have.IsDir() {
+		kind = "a folder"
+	}
+	sameKind := c.Have.IsDir() == c.Want.IsDir()
+	title := "Replace “" + name + "”?"
+	choose := []string{"Replace", "Skip", "Keep Both"}
+	if !sameKind {
+		title, choose = "“"+name+"” is already there", []string{"Keep Both", "Skip"}
+	}
+	ans, err := q.a.ask(ctx, Ask{Title: title, Text: where + " already has " + kind + " named “" + name + "”.",
+		Small: []string{"Existing: " + filemanager.ItemFacts(c.Have.Size, c.Have.IsDir(), c.Have.Mod),
+			"New: " + filemanager.ItemFacts(c.Want.Size, c.Want.IsDir(), c.Want.Mod)},
+		Choose: choose, Also: "Apply to all", No: "Stop", Careful: true})
 	switch {
 	case errors.Is(err, errDeclined):
 		// Stop is an answer, and the job ends saying it was stopped.
@@ -340,18 +367,19 @@ func (q overwriteAsker) Overwrite(ctx context.Context, c jobs.Conflict) (jobs.Ch
 	case err != nil:
 		return jobs.Choice{What: jobs.Stop}, err
 	}
-	what := jobs.Replace
-	if len(ans.Answers) > 0 && ans.Answers[0] == "Leave It" {
-		what = jobs.Skip
+	all := len(ans.Answers) > 1 && ans.Answers[1] == "yes"
+	switch {
+	case len(ans.Answers) > 0 && ans.Answers[0] == "Skip":
+		return jobs.Choice{What: jobs.Skip, All: all}, nil
+	case len(ans.Answers) > 0 && ans.Answers[0] == "Keep Both":
+		if all {
+			q.mu.Lock()
+			q.keepBoth = true
+			q.mu.Unlock()
+		}
+		return jobs.Choice{What: jobs.Rename, Name: vfs.Base(c.To, nameBeside(c.To, c.Path, c.Want.IsDir()))}, nil
 	}
-	return jobs.Choice{What: what, All: len(ans.Answers) > 1 && ans.Answers[1] == "yes"}, nil
-}
-
-func describe(e vfs.Entry) string {
-	if e.IsDir() {
-		return "a folder"
-	}
-	return words.Size(e.Size)
+	return jobs.Choice{What: jobs.Replace, All: all}, nil
 }
 
 // mostSpeeds is how many speed samples a job keeps for its graph, and
