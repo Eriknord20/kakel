@@ -7,6 +7,21 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.0-beta.18
+
+### Fixed
+
+**The arrow keys move through the file manager's sidebar.** In a sidebar
+too tall for its window, Up and Down scrolled it instead of moving from
+place to place. They now move the keyboard on, and scroll only past the
+first or the last.
+
+**After a delete, the arrow keys go on from where the file was.** With
+the keyboard on a file and the file deleted, the next Down started from
+the top of the view. Down now goes to the file that came after the one
+deleted, in the order the list is sorted, and Up to the one before. In
+the icons, Right goes to the tile that took its place.
+
 ## v0.12.0-beta.17
 
 ### Changed
