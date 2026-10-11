@@ -1,29 +1,33 @@
 package view
 
 import (
-	"slices"
+	"unicode/utf8"
 
 	"github.com/marrasen/kakel/app"
 	"github.com/marrasen/kakel/look"
 	"github.com/marrasen/kakel/machines"
 
 	"github.com/marrasen/gunim"
+	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/match"
 	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/text"
+	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
 )
 
 // The launcher's window: a field that finds a machine by its name as it
 // is typed, over the machines found, and once something is typed, the
 // shells here, files on each machine, saved commands and kakel's own
-// windows too. Enter opens what was opened there
-// last, a terminal at first; Tab shows what else can be opened there,
-// and Escape goes back. Escape again, or a click on another program,
-// closes it. The field keeps Left and Right for its own caret.
+// windows too. The machine lit shows what can be opened on it as chips
+// at the end of its line, the one Enter opens lit: what was opened there
+// last, at first its first, a terminal or the shell a new terminal
+// starts. Tab and Shift+Tab move the light along them, and so do Right
+// and Left once the field's caret has gone as far as it goes. Escape,
+// or a click on another program, closes it.
 
 // launcherRow is the height of a line of the launcher.
 const launcherRow = 34
@@ -34,21 +38,41 @@ const launcherRows = 8
 // LauncherSize is the launcher window's size.
 var LauncherSize = geom.Sz(560, 12*2+36+8+launcherRows*launcherRow)
 
+// Chips: the room inside each, between them, and before the first.
+const (
+	launchChipPad  = 8
+	launchChipGap  = 4
+	launchChipLead = 16
+)
+
 // Launcher is the launcher's view.
 type Launcher struct {
+	anim.Group
 	field *widget.TextField
 	st    app.LaunchState
-	// opened is the opening shown, machine the machine whose things are
-	// listed, or -1 while the machines are, and found what the field
-	// finds, by index into the machines or the machine's things. hot is
-	// the line lit, and first the first line shown.
-	opened      uint64
-	machine     int
-	machineID   machines.ID
-	found       []int
-	hot, first  int
+	// opened is the opening shown, and found what the field finds, by
+	// index into the machines and then the things. hot is the line lit,
+	// and first the first line shown.
+	opened     uint64
+	found      []int
+	hot, first int
+	// chip is the chip lit on the machine lit, chipFor that machine's ID
+	// and chipSet whether one was lit there; chipAt and chipW carry the
+	// light, and chipOff how far the chips are scrolled to show it.
+	// chipJump has them go there at once, for a line lit anew.
+	chip     int
+	chipFor  machines.ID
+	chipSet  bool
+	chipAt   *anim.Float
+	chipW    *anim.Float
+	chipOff  *anim.Float
+	chipJump bool
+	// chipHits are where the chips of the line lit were drawn, for a
+	// click.
+	chipHits    []geom.Rect
 	runs        []text.Run
 	notes       []text.Run
+	chipRuns    []text.Run
 	hint        text.Run
 	listTop     float32
 	pinned      bool
@@ -57,10 +81,24 @@ type Launcher struct {
 
 // NewLauncher returns the launcher's view.
 func NewLauncher() *Launcher {
-	l := &Launcher{field: widget.NewTextField(), machine: -1}
+	l := &Launcher{field: widget.NewTextField(), chipAt: anim.NewFloat(0), chipW: anim.NewFloat(0), chipOff: anim.NewFloat(0)}
+	l.Add(l.chipAt, l.chipW, l.chipOff)
 	l.field.Icon = icon.Search
 	// What is typed lights the best of what it finds.
 	l.field.OnChange = func(string, *gunim.UI) gunim.Intent { l.hot, l.first = 0, 0; l.find(); return nil }
+	// Right with the caret at the end, and Left with it at the start,
+	// go along the chips.
+	l.field.Keys = func(e input.KeyPress, u *gunim.UI) bool {
+		if e.Mods != 0 || e.Key != input.KeyRight && e.Key != input.KeyLeft {
+			return false
+		}
+		start, end := l.field.Selection()
+		at := 0
+		if e.Key == input.KeyRight {
+			at = utf8.RuneCountInString(l.field.Text())
+		}
+		return start == end && end == at && l.key(e, u)
+	}
 	return l
 }
 
@@ -73,43 +111,42 @@ func (l *Launcher) Update(st app.LaunchState, u *gunim.UI) {
 	}
 	if st.Opened != l.opened {
 		l.opened = st.Opened
-		l.machine, l.hot, l.first = -1, 0, 0
+		l.hot, l.first = 0, 0
+		l.chipFor, l.chipSet = "", false
 		l.field.SetText("", nil)
 		u.Focus(l.field)
 	}
 	l.find()
+	// The machines may come in another order: the light stays on the
+	// machine lit, and its chip with it.
+	if l.chipSet {
+		for k, i := range l.found {
+			if i < len(l.st.Machines) && l.st.Machines[i].ID == l.chipFor {
+				l.hot = k
+				break
+			}
+		}
+	}
 	u.Invalidate()
 }
 
-// titles are the titles of what the launcher lists now.
+// titles are the titles of what the launcher lists now: the machines,
+// and once something is typed, the rest too, after them.
 func (l *Launcher) titles() []match.Item {
 	var out []match.Item
-	if l.machine < 0 {
-		for _, m := range l.st.Machines {
-			out = append(out, match.Item{Title: m.Name, Also: []string{m.Note}})
-		}
-		// Once something is typed, the rest too: shells, files, saved
-		// commands, kakel's windows, after the machines.
-		if l.field.Text() != "" {
-			for _, t := range l.st.Things {
-				out = append(out, match.Item{Title: t.Title, Also: t.Also})
-			}
-		}
-		return out
+	for _, m := range l.st.Machines {
+		out = append(out, match.Item{Title: m.Name, Also: []string{m.Note}})
 	}
-	for _, a := range l.st.Machines[l.machine].Actions {
-		out = append(out, match.Item{Title: a.Title})
+	if l.field.Text() != "" {
+		for _, t := range l.st.Things {
+			out = append(out, match.Item{Title: t.Title, Also: t.Also})
+		}
 	}
 	return out
 }
 
-// find lists what the field finds, in the things of the machine
-// listed, found again by its ID, as the machines may come in another
-// order.
+// find lists what the field finds.
 func (l *Launcher) find() {
-	if l.machine >= 0 {
-		l.machine = slices.IndexFunc(l.st.Machines, func(m app.LaunchMachine) bool { return m.ID == l.machineID })
-	}
 	l.found = l.found[:0]
 	for _, f := range match.Rank(l.titles(), l.field.Text()) {
 		l.found = append(l.found, f.Index)
@@ -136,6 +173,7 @@ func (l *Launcher) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(look.SidebarFill.Get(th)))
 	kids.At(0).Paint(p)
 	size := widget.TextSize.Get(th)
+	lit := l.litMachine()
 	if l.runs == nil || l.shapedWidth != box.W {
 		l.shapedWidth = box.W
 		l.runs, l.notes = l.runs[:0], l.notes[:0]
@@ -144,9 +182,16 @@ func (l *Launcher) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 			l.runs = append(l.runs, text.Default().Shape(title, size))
 			l.notes = append(l.notes, text.Default().Shape(note, smallText.Get(th)))
 		}
+		l.chipRuns = l.chipRuns[:0]
+		if lit != nil {
+			for _, a := range lit.Actions {
+				l.chipRuns = append(l.chipRuns, text.Default().Shape(a.Title, smallText.Get(th)))
+			}
+		}
 		l.hint = text.Default().Shape(l.hintText(), smallText.Get(th))
 	}
 	ink, faint := widget.Ink.Get(th), look.Faint.Get(th)
+	l.chipHits = l.chipHits[:0]
 	if len(l.found) == 0 {
 		t := text.Default().Shape("Nothing is called that", size)
 		t.Paint(p, geom.Pt(20, l.listTop+(launcherRow-t.Height())/2), faint)
@@ -160,8 +205,6 @@ func (l *Launcher) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 		}
 		ic := icon.Server
 		switch {
-		case l.machine >= 0:
-			ic = icon.SquareTerminal
 		case l.thing(l.found[k]) != nil:
 			ic = thingIcons[l.thing(l.found[k]).Kind]
 		case l.st.Machines[l.found[k]].ID == "":
@@ -174,14 +217,84 @@ func (l *Launcher) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 		drawIcon(p, ic, geom.Rc(r.Min.X+10, mid-8, 16, 16), faint, 1.3)
 		run := l.runs[k]
 		run.Paint(p, geom.Pt(r.Min.X+36, mid-run.Height()/2), ink)
+		end := r.Min.X + 36 + run.Advance
 		if n := l.notes[k]; n.Advance > 0 {
-			x := r.Min.X + 36 + run.Advance + 10
-			n.Paint(p, geom.Pt(x, mid-n.Height()/2), faint)
+			n.Paint(p, geom.Pt(end+10, mid-n.Height()/2), faint)
+			end += 10 + n.Advance
 		}
-		if k == l.hot {
-			h := l.hint
-			h.Paint(p, geom.Pt(r.Max.X-12-h.Advance, mid-h.Height()/2), faint)
+		if k != l.hot {
+			continue
 		}
+		if lit != nil && len(l.chipRuns) == len(lit.Actions) {
+			l.paintChips(p, th, geom.Rc(end+launchChipLead, r.Min.Y, r.Max.X-6-(end+launchChipLead), r.Size().H))
+			continue
+		}
+		h := l.hint
+		h.Paint(p, geom.Pt(r.Max.X-12-h.Advance, mid-h.Height()/2), faint)
+	}
+}
+
+// paintChips draws what can be opened on the machine lit, in area at the
+// end of its line: against its right, or where they are too many to
+// fit, from its left and scrolled to show the one lit. The light slides
+// from chip to chip.
+func (l *Launcher) paintChips(p *paint.Painter, th *theme.Live, area geom.Rect) {
+	if area.Size().W <= 0 {
+		return
+	}
+	xs := make([]float32, len(l.chipRuns))
+	ws := make([]float32, len(l.chipRuns))
+	var all float32
+	for i, run := range l.chipRuns {
+		if i > 0 {
+			all += launchChipGap
+		}
+		xs[i], ws[i] = all, run.Advance+2*launchChipPad
+		all += ws[i]
+	}
+	// Scrolled as little as shows the chip lit whole.
+	off := l.chipOff.Target()
+	if l.chip < len(xs) {
+		off = min(off, xs[l.chip])
+		off = max(off, xs[l.chip]+ws[l.chip]-area.Size().W)
+	}
+	off = min(max(off, 0), max(all-area.Size().W, 0))
+	start := area.Min.X
+	if all < area.Size().W {
+		start = area.Max.X - all
+	}
+	spring := widget.Quick.Get(th)
+	switch {
+	case l.chip >= len(xs):
+	case l.chipJump:
+		l.chipJump = false
+		l.chipOff.Jump(off)
+		l.chipAt.Jump(xs[l.chip])
+		l.chipW.Jump(ws[l.chip])
+	default:
+		l.chipOff.Animate(off, spring)
+		l.chipAt.Animate(xs[l.chip], spring)
+		l.chipW.Animate(ws[l.chip], spring)
+	}
+	h := min(22, area.Size().H-6)
+	top := area.Min.Y + (area.Size().H-h)/2
+	o := start - l.chipOff.Value()
+	defer p.Layer(paint.LayerOpts{Bounds: area, Opacity: 1, Clip: true})()
+	p.RRect(geom.Rc(o+l.chipAt.Value(), top, l.chipW.Value(), h), h/2, paint.Solid(widget.ButtonPrimaryFill.Get(th)))
+	faint, onLit := look.Faint.Get(th), widget.ButtonPrimaryInk.Get(th)
+	edge := faint
+	edge.A = uint8(float32(edge.A) * 0.35)
+	for i, run := range l.chipRuns {
+		r := geom.Rc(o+xs[i], top, ws[i], h)
+		// Clicked only where it shows.
+		l.chipHits = append(l.chipHits, geom.Rect{Min: geom.Pt(max(r.Min.X, area.Min.X), r.Min.Y), Max: geom.Pt(min(r.Max.X, area.Max.X), r.Max.Y)})
+		col := faint
+		if i == l.chip {
+			col = onLit
+		} else {
+			p.RRectStroke(r.Inset(geom.Uniform(0.5)), h/2, paint.Fill{}, paint.Stroke{Width: 1, Color: edge})
+		}
+		run.Paint(p, geom.Pt(r.Min.X+launchChipPad, top+(h-run.Height())/2), col)
 	}
 }
 
@@ -196,10 +309,26 @@ var thingIcons = map[string]*icon.Icon{
 // machine, and nil otherwise.
 func (l *Launcher) thing(i int) *app.LaunchThing {
 	n := len(l.st.Machines)
-	if l.machine >= 0 || i < n || i-n >= len(l.st.Things) {
+	if i < n || i-n >= len(l.st.Things) {
 		return nil
 	}
 	return &l.st.Things[i-n]
+}
+
+// litMachine is the machine on the line lit, nil where that is a thing
+// or there is none. Lit anew, its chip lit is what Enter opens there.
+func (l *Launcher) litMachine() *app.LaunchMachine {
+	if l.hot >= len(l.found) || l.thing(l.found[l.hot]) != nil {
+		return nil
+	}
+	m := &l.st.Machines[l.found[l.hot]]
+	if !l.chipSet || l.chipFor != m.ID {
+		l.chipFor, l.chipSet, l.chipJump = m.ID, true, true
+		l.chip = m.Default
+		l.runs = nil
+	}
+	l.chip = min(max(l.chip, 0), max(len(m.Actions)-1, 0))
+	return m
 }
 
 // line is the title and the note of found item i.
@@ -207,21 +336,15 @@ func (l *Launcher) line(i int) (string, string) {
 	if t := l.thing(i); t != nil {
 		return t.Title, t.Note
 	}
-	if l.machine < 0 {
-		m := l.st.Machines[i]
-		return m.Name, m.Note
-	}
-	return l.st.Machines[l.machine].Actions[i].Title, ""
+	m := l.st.Machines[i]
+	return m.Name, m.Note
 }
 
-// hintText says what Enter and Tab do on the line lit.
+// hintText says what Enter does on a thing lit; a machine's chips say
+// it for themselves.
 func (l *Launcher) hintText() string {
-	if l.machine >= 0 || l.hot >= len(l.found) || l.thing(l.found[l.hot]) != nil {
+	if l.hot < len(l.found) && l.thing(l.found[l.hot]) != nil {
 		return "Enter opens it"
-	}
-	m := l.st.Machines[l.found[l.hot]]
-	if m.Default < len(m.Actions) {
-		return "Enter: " + m.Actions[m.Default].Title + " · Tab: more"
 	}
 	return ""
 }
@@ -234,7 +357,7 @@ func (l *Launcher) CaptionRects(size geom.Size) []geom.Rect {
 }
 
 // Handle implements [gunim.Handler]: the keys the field passes on, a
-// click on a line, and the window losing the keyboard.
+// click on a line or a chip, and the window losing the keyboard.
 func (l *Launcher) Handle(e input.Event, u *gunim.UI) bool {
 	switch e := e.(type) {
 	case input.WindowFocusLost:
@@ -244,6 +367,13 @@ func (l *Launcher) Handle(e input.Event, u *gunim.UI) bool {
 		k := int((e.Pos.Y - l.listTop) / launcherRow)
 		if e.Button != input.ButtonPrimary || e.Pos.Y < l.listTop || k >= launcherRows || l.first+k >= len(l.found) {
 			return false
+		}
+		if l.first+k == l.hot {
+			for i, r := range l.chipHits {
+				if r.Contains(e.Pos) {
+					l.chip = i
+				}
+			}
 		}
 		l.hot = l.first + k
 		l.runs = nil
@@ -267,8 +397,7 @@ func (l *Launcher) Handle(e input.Event, u *gunim.UI) bool {
 	return false
 }
 
-// key moves the light, picks, goes into a machine's things and back,
-// and closes.
+// key moves the light along the lines and the chips, picks, and closes.
 func (l *Launcher) key(e input.KeyPress, u *gunim.UI) bool {
 	switch e.Key {
 	case input.KeyUp:
@@ -277,31 +406,33 @@ func (l *Launcher) key(e input.KeyPress, u *gunim.UI) bool {
 		l.hot = min(l.hot+1, max(len(l.found)-1, 0))
 	case input.KeyEnter, input.KeyKPEnter:
 		l.pick(u)
-	case input.KeyTab, input.KeyRight:
-		if l.machine >= 0 || l.hot >= len(l.found) || l.thing(l.found[l.hot]) != nil {
-			return e.Key == input.KeyTab
-		}
-		l.machine, l.hot = l.found[l.hot], 0
-		l.machineID = l.st.Machines[l.machine].ID
-		l.field.SetText("", nil)
-		l.find()
-	case input.KeyLeft, input.KeyEscape:
-		if l.machine < 0 {
-			if e.Key == input.KeyEscape {
-				u.Send(l, app.CloseLauncher{})
-				return true
+	case input.KeyTab:
+		// Round the chips, the other way with Shift.
+		if m := l.litMachine(); m != nil && len(m.Actions) > 0 {
+			step := 1
+			if e.Mods.Has(input.ModShift) {
+				step = len(m.Actions) - 1
 			}
+			l.chip = (l.chip + step) % len(m.Actions)
+		}
+	case input.KeyRight, input.KeyLeft:
+		// The field's caret has gone as far as it goes, as its Keys
+		// says: along the chips, as far as the last or the first.
+		m := l.litMachine()
+		if m == nil {
 			return false
 		}
-		was := l.machine
-		l.machine = -1
-		l.field.SetText("", nil)
-		l.find()
-		for k, i := range l.found {
-			if i == was {
-				l.hot = k
-			}
+		to := l.chip + 1
+		if e.Key == input.KeyLeft {
+			to = l.chip - 1
 		}
+		if to < 0 || to >= len(m.Actions) {
+			return false
+		}
+		l.chip = to
+	case input.KeyEscape:
+		u.Send(l, app.CloseLauncher{})
+		return true
 	default:
 		return false
 	}
@@ -310,7 +441,7 @@ func (l *Launcher) key(e input.KeyPress, u *gunim.UI) bool {
 	return true
 }
 
-// pick opens the line lit: a machine's usual thing, or the thing lit.
+// pick opens the line lit: the chip lit on a machine, or the thing lit.
 func (l *Launcher) pick(u *gunim.UI) {
 	if l.hot >= len(l.found) {
 		return
@@ -319,15 +450,10 @@ func (l *Launcher) pick(u *gunim.UI) {
 		u.Send(l, app.Launch{Machine: t.Machine, Action: t.Action})
 		return
 	}
-	if l.machine < 0 {
-		m := l.st.Machines[l.found[l.hot]]
-		if m.Default < len(m.Actions) {
-			u.Send(l, app.Launch{Machine: m.ID, Action: m.Actions[m.Default].ID})
-		}
-		return
+	m := l.litMachine()
+	if m != nil && l.chip < len(m.Actions) {
+		u.Send(l, app.Launch{Machine: m.ID, Action: m.Actions[l.chip].ID})
 	}
-	m := l.st.Machines[l.machine]
-	u.Send(l, app.Launch{Machine: m.ID, Action: m.Actions[l.found[l.hot]].ID})
 }
 
 // noTitleBar is a title bar of no height, for a window with none: the

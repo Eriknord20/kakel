@@ -64,26 +64,64 @@ func TestTheLauncherFindsAMachineByItsName(t *testing.T) {
 	}
 }
 
-// Tab shows what else can be opened on the machine lit, Down and Enter
-// pick one; Escape goes back to the machines, and again closes it.
-func TestTheLauncherOffersTheRest(t *testing.T) {
+// Tab lights the next of what can be opened on the machine lit, and
+// Enter opens it; Escape closes the launcher.
+func TestTabLightsTheNextChip(t *testing.T) {
 	_, w := launcherStage(t)
-	press := func(k gi.Key) {
-		w.Input(gi.KeyPress{Key: k})
+	press := func(k gi.Key, mods gi.Mods) {
+		w.Input(gi.KeyPress{Key: k, Mods: mods})
 		w.Frame(time.Second / 60)
 	}
-	press(gi.KeyDown)
-	press(gi.KeyTab)
-	press(gi.KeyDown)
-	press(gi.KeyEnter)
+	press(gi.KeyDown, 0)
+	press(gi.KeyTab, 0)
+	press(gi.KeyEnter, 0)
 	if in := next(t, w); in != (app.Launch{Machine: "a", Action: "files"}) {
-		t.Fatalf("the second thing on the second machine sent %#v", in)
+		t.Fatalf("Tab and Enter on the second machine sent %#v", in)
 	}
-	// Back to the machines, and out.
-	press(gi.KeyEscape)
-	press(gi.KeyEscape)
+	press(gi.KeyEscape, 0)
 	if in := next(t, w); in != (app.CloseLauncher{}) {
 		t.Fatalf("Escape sent %#v", in)
+	}
+}
+
+// The chip lit at first is what Enter opens there, what was opened last;
+// Tab goes on round from it, and Shift+Tab back.
+func TestTheChipLitIsWhatEnterOpens(t *testing.T) {
+	l, w := launcherStage(t)
+	press := func(k gi.Key, mods gi.Mods) {
+		w.Input(gi.KeyPress{Key: k, Mods: mods})
+		w.Frame(time.Second / 60)
+	}
+	press(gi.KeyDown, 0)
+	press(gi.KeyDown, 0)
+	if l.chip != 1 {
+		t.Fatalf("backup, last opened for its files, lights chip %d", l.chip)
+	}
+	press(gi.KeyTab, 0)
+	if l.chip != 0 {
+		t.Fatalf("Tab from the last chip lit %d, want the first", l.chip)
+	}
+	press(gi.KeyTab, gi.ModShift)
+	press(gi.KeyEnter, 0)
+	if in := next(t, w); in != (app.Launch{Machine: "b", Action: "files"}) {
+		t.Fatalf("Shift+Tab back and Enter sent %#v", in)
+	}
+}
+
+// A click on a chip of the line lit opens it.
+func TestAClickOnAChipOpensIt(t *testing.T) {
+	l, w := launcherStage(t)
+	for range 30 {
+		w.Frame(time.Second / 60)
+	}
+	if len(l.chipHits) != 2 {
+		t.Fatalf("this computer shows %d chips, want 2", len(l.chipHits))
+	}
+	at := l.chipHits[1].Center()
+	w.Input(gi.PointerDown{Pos: at, Button: gi.ButtonPrimary, Clicks: 1})
+	w.Frame(time.Second / 60)
+	if in := next(t, w); in != (app.Launch{Machine: "", Action: "files"}) {
+		t.Fatalf("a click on Files sent %#v", in)
 	}
 }
 
@@ -100,11 +138,12 @@ func TestTypingLightsTheBestMatch(t *testing.T) {
 	}
 }
 
-// A machine's things stay that machine's as the machines come in
+// The light and its chip stay on their machine as the machines come in
 // another order, and a right click picks nothing.
 func TestTheLauncherKeepsItsMachine(t *testing.T) {
 	l, w := launcherStage(t)
 	w.Input(gi.KeyPress{Key: gi.KeyDown})
+	w.Frame(time.Second / 60)
 	w.Input(gi.KeyPress{Key: gi.KeyTab})
 	st := l.st
 	st.Machines = []app.LaunchMachine{st.Machines[0], st.Machines[2], st.Machines[1]}
@@ -114,7 +153,7 @@ func TestTheLauncherKeepsItsMachine(t *testing.T) {
 	w.Frame(time.Second / 60)
 	w.Input(gi.KeyPress{Key: gi.KeyEnter})
 	w.Frame(time.Second / 60)
-	if in := next(t, w); in != (app.Launch{Machine: "a", Action: "terminal"}) {
+	if in := next(t, w); in != (app.Launch{Machine: "a", Action: "files"}) {
 		t.Fatalf("Enter sent %#v", in)
 	}
 	w.Input(gi.PointerDown{Pos: geom.Pt(100, l.listTop+5), Button: gi.ButtonSecondary})
@@ -155,5 +194,68 @@ func TestTheLauncherFindsShellsAndFiles(t *testing.T) {
 	typeIn("files on b")
 	if in := next(t, w); in != (app.Launch{Machine: "b", Action: "files"}) {
 		t.Fatalf("files on b and Enter sent %#v", in)
+	}
+}
+
+// Right and Left move along the chips once the field has nothing more
+// to move its caret through, and stop at the ends.
+func TestRightAndLeftMoveAlongTheChips(t *testing.T) {
+	l, w := launcherStage(t)
+	press := func(k gi.Key) {
+		w.Input(gi.KeyPress{Key: k})
+		w.Frame(time.Second / 60)
+	}
+	press(gi.KeyDown)
+	press(gi.KeyRight)
+	press(gi.KeyRight)
+	if l.chip != 1 {
+		t.Fatalf("Right twice lit chip %d, want the last, 1", l.chip)
+	}
+	press(gi.KeyLeft)
+	press(gi.KeyEnter)
+	if in := next(t, w); in != (app.Launch{Machine: "a", Action: "terminal"}) {
+		t.Fatalf("Right, Left and Enter sent %#v", in)
+	}
+}
+
+// The light slides from chip to chip, over frames; and where the chips
+// are too many to fit, as this computer's shells can be, they scroll to
+// show the one lit.
+func TestTheChipLightSlidesAndTheChipsScroll(t *testing.T) {
+	l, w := launcherStage(t)
+	st := l.st
+	var many []app.LaunchAction
+	for _, name := range []string{"PowerShell 7", "Windows PowerShell", "Command Prompt", "Ubuntu (WSL)", "Debian (WSL)", "Files"} {
+		many = append(many, app.LaunchAction{ID: "x:" + name, Title: name})
+	}
+	st.Machines[0].Actions = many
+	if err := w.Client().Publish(app.LauncherTopic, st); err != nil {
+		t.Fatal(err)
+	}
+	frames := func(n int) {
+		for range n {
+			w.Frame(time.Second / 60)
+		}
+	}
+	frames(30)
+	from := l.chipAt.Value()
+	w.Input(gi.KeyPress{Key: gi.KeyTab})
+	// Painted toward the next chip, and a frame on its way.
+	frames(2)
+	to := l.chipAt.Target()
+	if mid := l.chipAt.Value(); !(mid > from && mid < to) {
+		t.Fatalf("a frame after Tab the light is at %v, want on its way from %v to %v", mid, from, to)
+	}
+	if l.chipOff.Value() != 0 {
+		t.Fatalf("the first chips are scrolled by %v", l.chipOff.Value())
+	}
+	for range len(many) - 2 {
+		w.Input(gi.KeyPress{Key: gi.KeyTab})
+		frames(2)
+	}
+	frames(40)
+	last := l.chipHits[len(l.chipHits)-1]
+	if l.chipOff.Value() <= 0 || last.Size().W < 20 {
+		t.Fatalf("with the last chip lit the chips are scrolled by %v, and it shows %v wide", l.chipOff.Value(), last.Size().W)
 	}
 }
