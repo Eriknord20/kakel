@@ -7,6 +7,26 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.0-beta.20
+
+### Changed
+
+**A new terminal says what it opens.** In the command palette
+(Ctrl+Shift+K) and the File menu, "New Terminal" is called for what
+Ctrl+Shift+T opens from the pane in front: "New PowerShell 7" or "New
+Command Prompt", the shell of the pane in front or else your default,
+or "New Terminal on skylake" for a pane on a server. "New File Manager"
+is "Files on This computer", or on the server in front, and "New File
+Manager Window" is "Files in a New Window". The old words still find
+them. "New Terminal, Default Shell" is gone: type a shell's name to
+open it.
+
+### Fixed
+
+**The launcher's chips brighten as the light slides onto them.** A
+chip's text changed at once as Tab lit it, while the light was still
+on its way.
+
 ## v0.12.0-beta.19
 
 ### Added
