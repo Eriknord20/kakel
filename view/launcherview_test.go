@@ -259,3 +259,30 @@ func TestTheChipLightSlidesAndTheChipsScroll(t *testing.T) {
 		t.Fatalf("with the last chip lit the chips are scrolled by %v, and it shows %v wide", l.chipOff.Value(), last.Size().W)
 	}
 }
+
+// A chip's text brightens as the light slides onto it, not at once:
+// on the way there is a frame where the light covers part of it.
+func TestAChipBrightensAsTheLightSlidesOnto(t *testing.T) {
+	l, w := launcherStage(t)
+	frames := func(n int) {
+		for range n {
+			w.Frame(time.Second / 60)
+		}
+	}
+	frames(30)
+	w.Input(gi.KeyPress{Key: gi.KeyTab})
+	frames(1)
+	part := false
+	for range 30 {
+		frames(1)
+		hit := l.chipHits[1]
+		o := hit.Min.X - l.chipAt.Target()
+		from, to := l.chipAt.Value()+o, l.chipAt.Value()+l.chipW.Value()+o
+		if cover := (min(to, hit.Max.X) - max(from, hit.Min.X)) / hit.Size().W; cover > 0.05 && cover < 0.95 {
+			part = true
+		}
+	}
+	if !part {
+		t.Fatal("the chip went from dark to lit with no frame between")
+	}
+}

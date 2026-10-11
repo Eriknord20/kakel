@@ -63,7 +63,6 @@ func Shortcuts() *ui.Keymap {
 var commands = []struct{ id, title string }{
 	{"conn.terminal", "New Terminal"},
 	{"conn.files", "New File Manager"},
-	{"shell.default", "New Terminal, Default Shell"},
 	{"pane.splitRight", "Split Right"},
 	{"pane.splitDown", "Split Down"},
 	{"pane.popOut", "Pop Out Pane"},
@@ -79,7 +78,7 @@ var commands = []struct{ id, title string }{
 	{"tab.moveLeft", "Move Tab Left"},
 	{"tab.close", "Close Tab"},
 	{"tab.newWindow", "Move Tab to New Window"},
-	{"files.manager", "New File Manager Window"},
+	{"files.manager", "Files in a New Window"},
 	{"servers.window", "Open Machines Window"},
 	{"secrets.window", "Open Secrets Window"},
 	{"view.switcher", "All Panes"},
@@ -195,7 +194,6 @@ var aliases = map[string]string{
 // command.
 var commandIcons = map[string]*icon.Icon{
 	"conn.terminal":          icon.SquareTerminal,
-	"shell.default":          icon.SquareTerminal,
 	"pane.splitRight":        icon.Columns2,
 	"pane.splitDown":         icon.Rows2,
 	"pane.popOut":            icon.SquareArrowOutUpRight,
@@ -308,7 +306,7 @@ var menus = []struct {
 	{"File", []menuItem{
 		{id: "conn.terminal", title: "New Terminal"},
 		{id: "conn.files", title: "New File Manager"},
-		{id: "files.manager", title: "New File Manager Window"},
+		{id: "files.manager", title: "Files in a New Window"},
 		{id: "app.settings", title: "Settings", group: true},
 		{title: "Close", caption: true}, {id: "pane.close", title: "Pane"},
 		{id: "app.exit", title: "Exit", group: true},
@@ -425,7 +423,7 @@ var commandAlso = map[string][]string{
 	"tab.newWindow":         {"detach", "tear off", "pop out", "own window"},
 	"servers.window":        {"tool window", "machines", "sidebar", "own window"},
 	"secrets.window":        {"tool window", "password", "vault", "own window"},
-	"conn.terminal":         {"pane", "shell", "like this one", "same shell", "same server", "duplicate", "clone", "new tab"},
+	"conn.terminal":         {"new terminal", "terminal", "pane", "shell", "like this one", "same shell", "same server", "duplicate", "clone", "new tab"},
 	"view.fullScreen":       {"fill", "maximise", "maximize", "hide the menus"},
 	"view.pin":              {"pin", "keep on top", "float", "stay on top"},
 	"pane.typeAll":          {"broadcast", "synchronize", "sync panes", "every pane", "same input"},
@@ -439,7 +437,6 @@ var commandAlso = map[string][]string{
 	"app.settings":          {"preferences", "options", "update", "upgrade", "new version", "beta", "sound", "audio", "bell", "rings", "animation", "title bar", "window manager", "decorations"},
 	"app.autostart":         {"start with windows", "login", "startup", "boot", "tray"},
 	"app.folders":           {"file explorer", "default file manager", "win+e", "browse"},
-	"shell.default":         {"pane"},
 	"server.connect":        {"ssh", "host", "machine"},
 	"server.add":            {"new", "save"},
 	"server.import":         {"ssh config", "~/.ssh/config", "openssh", "hosts"},
@@ -461,13 +458,13 @@ var commandAlso = map[string][]string{
 	"sshkey.make":           {"make", "create", "generate", "keygen", "ed25519"},
 	"sshkey.forget":         {"forget", "kept", "delete", "list", "identity", "clear"},
 	"sshkey.add":            {"existing key", "import", "id_rsa", "id_ed25519", "identity", "private key"},
-	"files.manager":         {"files in a new window", "files", "explorer", "finder", "folders", "browse"},
+	"files.manager":         {"new file manager window", "files", "explorer", "finder", "folders", "browse"},
 	"sidebar.toggle":        {"show", "hide", "toggle", "connections", "panel", "sidebar", "machines", "window"},
 	"sidebar.focus":         {"go to the connections", "panel", "focus sidebar", "machines"},
 	"conn.command":          {"here", "program", "execute"},
 	"conn.tunnel":           {"forward", "port", "local", "remote"},
 	"conn.socks":            {"tunnel", "dynamic"},
-	"conn.files":            {"files here", "file browser", "browse", "explorer", "sftp", "folder", "directory"},
+	"conn.files":            {"new file manager", "file manager", "files here", "file browser", "browse", "explorer", "sftp", "folder", "directory"},
 	"conn.disconnect":       {"close the connection", "machine", "server", "log out"},
 	"conn.log":              {"how this was reached", "route", "hops"},
 	"help.shortcuts":        {"keys", "keyboard", "help"},
@@ -547,8 +544,6 @@ func commandIntent(id string) (gunim.Intent, bool) {
 		return app.NextPane{Back: true}, true
 	case "conn.terminal":
 		return app.NewTerminal{}, true
-	case "shell.default":
-		return app.OpenDefaultShell{}, true
 	case "secrets.pane":
 		return app.ShowSecrets{}, true
 	case "secrets.addKey":

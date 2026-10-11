@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/marrasen/kakel/machines"
+	shellfind "github.com/marrasen/kakel/shells"
 	"github.com/marrasen/kakel/single"
 
 	"github.com/marrasen/gunim"
@@ -297,4 +298,22 @@ func TestTheLauncherOpensSettingsAndAbout(t *testing.T) {
 	}
 	a.handleLaunch(Launch{Action: "app:about"})
 	waitFor(t, a, "the window about kakel", func() bool { return wins.seen(func() bool { return len(wins.abouts) == 1 }) })
+}
+
+// A new terminal is said to run the shell of the pane in front, or else
+// the default; on a pane on a server, no shell of this computer's.
+func TestTheShellHereIsThePanesOrTheDefault(t *testing.T) {
+	a, _, _ := twoWindowApp(t)
+	cmd := shellfind.Shell{ID: "cmd", Title: "Command Prompt", Path: `C:\Windows\System32\cmd.exe`}
+	a.found = []shellfind.Shell{cmd, {ID: "pwsh", Title: "PowerShell 7", Path: `C:\pwsh.exe`}}
+	a.st.Shells = []ShellChoice{{ID: "cmd", Title: "Command Prompt"}, {ID: "pwsh", Title: "PowerShell 7"}}
+	a.st.ChosenShell = "pwsh"
+	a.st.Focus = "p9"
+	if got := a.shellHere(); got != "PowerShell 7" {
+		t.Fatalf("in front of a pane started with no shell named, a new terminal runs %q, want the default", got)
+	}
+	a.argvs["p9"] = cmd.Command("")
+	if got := a.shellHere(); got != "Command Prompt" {
+		t.Fatalf("in front of a Command Prompt, a new terminal runs %q", got)
+	}
 }

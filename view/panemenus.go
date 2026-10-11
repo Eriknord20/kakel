@@ -46,7 +46,7 @@ func (w *Window) buildBar(refill bool) {
 			if chord, ok := w.keys.ChordFor(it.id); ok && !it.caption && it.pane == "" {
 				hint = chordLabel(chord)
 			}
-			bm.Items = append(bm.Items, widget.MenuItem{Label: it.title, Hint: hint, Icon: commandIcons[it.id],
+			bm.Items = append(bm.Items, widget.MenuItem{Label: w.commandTitle(it.id, it.title), Hint: hint, Icon: commandIcons[it.id],
 				Checked: it.on, Caption: it.caption, Break: it.group || (it.caption && i > 0)})
 		}
 		w.bar.Menus = append(w.bar.Menus, withAccessKeys(bm, first...))

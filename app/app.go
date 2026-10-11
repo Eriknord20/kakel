@@ -159,6 +159,12 @@ type State struct {
 	// ChosenShell, or the user's own as found among Shells; "" where
 	// that is not known.
 	DefaultShell string
+	// HereMachine is the machine a new terminal and New Files open on,
+	// from the pane in front, and HereShell the name of the shell such
+	// a terminal runs on this computer: the one in front, or else the
+	// default. It is "" on a server, or where it is not known.
+	HereMachine machines.ID
+	HereShell   string
 	// ThisComputer is this computer's settings: where a new terminal
 	// starts.
 	ThisComputer ThisComputer
@@ -1276,6 +1282,7 @@ func (a *app) publish() {
 	st.SavedCommands = slices.Clone(a.st.SavedCommands)
 	st.Shells = slices.Clone(a.st.Shells)
 	st.DefaultShell = a.defaultShell()
+	st.HereMachine, st.HereShell = a.filesKey(a.st.Focus), a.shellHere()
 	st.SavedCopies = slices.Clone(a.st.SavedCopies)
 	st.Connected = a.machines.Connected()
 	st.Dialing = a.machines.Dialing()

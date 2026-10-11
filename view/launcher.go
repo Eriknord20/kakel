@@ -284,17 +284,20 @@ func (l *Launcher) paintChips(p *paint.Painter, th *theme.Live, area geom.Rect) 
 	faint, onLit := look.Faint.Get(th), widget.ButtonPrimaryInk.Get(th)
 	edge := faint
 	edge.A = uint8(float32(edge.A) * 0.35)
+	from, to := l.chipAt.Value(), l.chipAt.Value()+l.chipW.Value()
 	for i, run := range l.chipRuns {
 		r := geom.Rc(o+xs[i], top, ws[i], h)
 		// Clicked only where it shows.
 		l.chipHits = append(l.chipHits, geom.Rect{Min: geom.Pt(max(r.Min.X, area.Min.X), r.Min.Y), Max: geom.Pt(min(r.Max.X, area.Max.X), r.Max.Y)})
-		col := faint
-		if i == l.chip {
-			col = onLit
-		} else {
-			p.RRectStroke(r.Inset(geom.Uniform(0.5)), h/2, paint.Fill{}, paint.Stroke{Width: 1, Color: edge})
+		// As lit as the light covers it, so its text brightens and its
+		// edge fades as the light slides onto it, and back as it leaves.
+		lit := min(max((min(to, xs[i]+ws[i])-max(from, xs[i]))/ws[i], 0), 1)
+		if lit < 1 {
+			e := edge
+			e.A = uint8(float32(e.A) * (1 - lit))
+			p.RRectStroke(r.Inset(geom.Uniform(0.5)), h/2, paint.Fill{}, paint.Stroke{Width: 1, Color: e})
 		}
-		run.Paint(p, geom.Pt(r.Min.X+launchChipPad, top+(h-run.Height())/2), col)
+		run.Paint(p, geom.Pt(r.Min.X+launchChipPad, top+(h-run.Height())/2), anim.Mix(anim.ColorCodec, faint, onLit, lit))
 	}
 }
 

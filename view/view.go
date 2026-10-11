@@ -152,6 +152,10 @@ type Window struct {
 	shellChoices []app.ShellChoice
 	chosenShell  string
 	defaultShell string
+	// hereMachine and hereShell are where a new terminal and Files open,
+	// and the shell such a terminal runs, from the pane in front.
+	hereMachine machines.ID
+	hereShell   string
 	// termProgram is what new shells are told the terminal is called,
 	// and launcherKey the launcher's key, as last published.
 	termProgram string
@@ -1240,7 +1244,8 @@ func (w *Window) servers(saved []remote.Host) {
 		if notInPalette[c.id] {
 			continue
 		}
-		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: c.title, Icon: commandIcons[c.id], Hint: hint(c.id), Also: commandAlso[c.id]})
+		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: w.commandTitle(c.id, c.title), Icon: commandIcons[c.id],
+			Hint: hint(c.id), Also: commandAlso[c.id]})
 		w.paletteIDs = append(w.paletteIDs, c.id)
 	}
 	for _, h := range saved {
@@ -1271,14 +1276,19 @@ func (w *Window) servers(saved []remote.Host) {
 		if m == "" {
 			where = "This computer"
 		}
-		if m != "" || len(w.shellChoices) == 0 {
+		// The machine in front has its terminal and its files at the
+		// top already, as the new ones.
+		here := m == w.hereMachine
+		if (m != "" || len(w.shellChoices) == 0) && !here {
 			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Terminal on " + where, Icon: icon.SquareTerminal,
 				Also: []string{"new terminal", "shell", "ssh"}})
 			w.paletteIDs = append(w.paletteIDs, "conn.terminal."+w.cmdName(m))
 		}
-		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Files on " + where, Icon: icon.Folder,
-			Also: []string{"new file manager", "file manager", "folder", "browse", "explorer"}})
-		w.paletteIDs = append(w.paletteIDs, "conn.files."+w.cmdName(m))
+		if !here {
+			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Files on " + where, Icon: icon.Folder,
+				Also: []string{"new file manager", "file manager", "folder", "browse", "explorer"}})
+			w.paletteIDs = append(w.paletteIDs, "conn.files."+w.cmdName(m))
+		}
 		for i, f := range w.foldersOn(m) {
 			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: f.Label(), Detail: where, Icon: icon.Folder,
 				Also: []string{"files", "favourite", "new file manager", f.Path}})
@@ -2101,6 +2111,12 @@ func (w *Window) Update(st app.State, u *gunim.UI) {
 		w.shellChoices, w.chosenShell, w.thisComputer, w.favourites = st.Shells, st.ChosenShell, st.ThisComputer, st.Favourites
 		w.defaultShell = st.DefaultShell
 		w.servers(w.saved)
+	}
+	// A new terminal and Files are named for what they open, which
+	// follows the pane in front.
+	if st.HereMachine != w.hereMachine || st.HereShell != w.hereShell {
+		w.hereMachine, w.hereShell = st.HereMachine, st.HereShell
+		w.buildBar(true)
 	}
 	w.echoFor(st, u)
 	if st.Bells > w.bells {
@@ -3481,6 +3497,31 @@ func (w *Window) machines() []machines.ID {
 		out = append(out, rw.Name)
 	}
 	return out
+}
+
+// commandTitle is what command id, called title in the list of
+// commands, is called now. A new terminal is called for what it opens
+// from the pane in front: "New PowerShell 7", or "New Terminal on
+// skylake"; New Files for where: "Files on This computer". Under the
+// Machine menu's Open Here, Terminal is called for its shell.
+func (w *Window) commandTitle(id, title string) string {
+	where := "This computer"
+	if w.hereMachine != "" {
+		where = w.nameOf(w.hereMachine)
+	}
+	switch {
+	case id == "conn.terminal" && title == "Terminal":
+		if w.hereShell != "" {
+			return w.hereShell
+		}
+	case id == "conn.terminal" && w.hereShell != "":
+		return "New " + w.hereShell
+	case id == "conn.terminal" && w.hereMachine != "":
+		return "New Terminal on " + where
+	case id == "conn.files" && title != "Files":
+		return "Files on " + where
+	}
+	return title
 }
 
 // paletteMachines are the machines the palette opens things on, as the

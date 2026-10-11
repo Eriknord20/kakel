@@ -91,6 +91,28 @@ func (a *app) defaultShell() string {
 	return a.ownShell
 }
 
+// shellHere is the name of the shell a new terminal from the pane in
+// front runs, as likeHere picks it: the one that pane runs, or else the
+// default. It is "" for a pane on a server, or a shell not found.
+func (a *app) shellHere() string {
+	id := a.here()
+	if a.machineOf(id) != "" {
+		return ""
+	}
+	want := a.defaultShell()
+	if _, cmd := a.commands[id]; !cmd {
+		if s, ok := shellfind.Running(a.found, a.argvs[id]); ok && len(a.argvs[id]) > 0 {
+			want = s.ID
+		}
+	}
+	for _, s := range a.st.Shells {
+		if s.ID == want {
+			return s.Title
+		}
+	}
+	return ""
+}
+
 // shellsDefaultFirst are the shells here, the one a new terminal starts
 // first.
 func (a *app) shellsDefaultFirst() []ShellChoice {

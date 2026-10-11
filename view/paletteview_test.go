@@ -35,20 +35,50 @@ func TestThePaletteFindsCommandsByOtherWords(t *testing.T) {
 	find("Open the Menus")
 }
 
-// The palette starts with what opens in this window, said alike: a
-// terminal, then a file manager, both on the machine of the pane in
-// front. A file manager in a window of its own comes later.
-func TestThePaletteStartsWithANewTerminalAndANewFileManager(t *testing.T) {
-	win, _, _ := windowStage(t)
-	var titles []string
-	for _, it := range win.palette.Items[:2] {
-		titles = append(titles, it.Title)
+// The palette starts with what opens in this window, called for what it
+// opens from the pane in front: the shell a new terminal runs, or the
+// server it goes to, and where Files opens. A file manager in a window
+// of its own comes later, and the menus call them the same.
+func TestThePaletteStartsWithANewTerminalAndFiles(t *testing.T) {
+	win, _, publish := windowStage(t)
+	first := func() []string {
+		var titles []string
+		for _, it := range win.palette.Items[:2] {
+			titles = append(titles, it.Title)
+		}
+		return titles
 	}
-	if want := []string{"New Terminal", "New File Manager"}; !slices.Equal(titles, want) {
-		t.Fatalf("the palette starts with %q, want %q", titles, want)
+	if want := []string{"New Terminal", "Files on This computer"}; !slices.Equal(first(), want) {
+		t.Fatalf("with no shell known, the palette starts with %q, want %q", first(), want)
 	}
-	if !slices.ContainsFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "New File Manager Window" }) {
-		t.Fatal("the palette has no New File Manager Window")
+	shells := []app.ShellChoice{{ID: "cmd", Title: "Command Prompt"}, {ID: "pwsh", Title: "PowerShell 7"}}
+	publish(app.State{Shells: shells, DefaultShell: "pwsh", HereShell: "Command Prompt"})
+	if want := []string{"New Command Prompt", "Files on This computer"}; !slices.Equal(first(), want) {
+		t.Fatalf("in front of a Command Prompt, the palette starts with %q, want %q", first(), want)
+	}
+	plain := func(s string) string { return strings.ReplaceAll(s, "&", "") }
+	if file := win.bar.Menus[0].Items; plain(file[0].Label) != "New Command Prompt" || plain(file[1].Label) != "Files on This computer" {
+		t.Fatalf("the File menu starts with %q and %q", file[0].Label, file[1].Label)
+	}
+	publish(app.State{Shells: shells, DefaultShell: "pwsh", HereMachine: "sky",
+		Machines: []machines.Info{{ID: "sky", Name: "skylake"}}, Saved: []remote.Host{{ID: "sky", Name: "skylake"}}})
+	if want := []string{"New Terminal on skylake", "Files on skylake"}; !slices.Equal(first(), want) {
+		t.Fatalf("in front of a pane on skylake, the palette starts with %q, want %q", first(), want)
+	}
+	n := 0
+	for _, it := range win.palette.Items {
+		switch it.Title {
+		case "Files on skylake", "Terminal on skylake":
+			n++
+		case "New Terminal, Default Shell":
+			t.Fatal("the palette still has New Terminal, Default Shell")
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the palette has skylake's files and terminal %d times besides the new ones, want the files once", n)
+	}
+	if !slices.ContainsFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "Files in a New Window" }) {
+		t.Fatal("the palette has no Files in a New Window")
 	}
 }
 
