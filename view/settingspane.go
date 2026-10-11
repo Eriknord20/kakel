@@ -31,6 +31,12 @@ import (
 // it there. The pane shows what the program publishes, and leaves alone
 // a line being typed.
 
+// updateChoices are the update setting's choices, as Settings lists
+// them and writes them.
+var updateChoices = []struct{ title, value string }{
+	{"Tell me", settings.UpdatesNotify}, {"Install them", settings.UpdatesInstall}, {"Off", settings.UpdatesOff},
+}
+
 // settingsTabs are the pane's tabs, in order, and their icons.
 var settingsTabs = []struct {
 	title string

@@ -245,37 +245,6 @@ func (w *Window) installDialog(u *gunim.UI) {
 	w.openDialog(d, u)
 }
 
-// updateChoices are the update setting's choices, as the dialog lists
-// them and the settings write them.
-var updateChoices = []struct{ title, value string }{
-	{"Tell me", settings.UpdatesNotify}, {"Install them", settings.UpdatesInstall}, {"Off", settings.UpdatesOff},
-}
-
-// updatesDialog asks what kakel does with a newer release.
-func (w *Window) updatesDialog(u *gunim.UI) {
-	var titles []string
-	at := 0
-	for i, c := range updateChoices {
-		titles = append(titles, c.title)
-		if c.value == w.update.Updates {
-			at = i
-		}
-	}
-	pick := widget.NewDropdown(widget.Labels(titles...))
-	pick.SetSelected(at, nil)
-	d := widget.NewDialog("Updates")
-	d.Body = widget.NewForm().
-		Add("New releases", pick).
-		Add("", widget.NewLabel("Installed, an update starts the next time kakel does."))
-	d.SetButtons("Save", "Cancel")
-	d.AddAction("Check Now", func(u *gunim.UI) gunim.Intent { d.Close(u); u.Send(w, app.CheckUpdates{}); return nil })
-	d.OnAccept = func(u *gunim.UI) gunim.Intent {
-		return app.SetUpdates{What: updateChoices[max(0, min(pick.Selected(), len(updateChoices)-1))].value}
-	}
-	d.OnDismiss = widget.Sends(app.DialogClosed{})
-	w.openDialog(d, u)
-}
-
 // thisComputerDialog edits this computer's settings, as Edit This
 // Server… does a server's: the folder a new terminal starts in, and the
 // shell it runs.

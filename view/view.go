@@ -531,9 +531,6 @@ func (w *Window) run(id string, u *gunim.UI) bool {
 	case "app.install":
 		w.installDialog(u)
 		return true
-	case "app.updates":
-		w.updatesDialog(u)
-		return true
 	case "app.settings":
 		u.Send(w, app.ShowSettings{})
 		return true
