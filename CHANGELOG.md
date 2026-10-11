@@ -7,6 +7,40 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.0-beta.17
+
+### Changed
+
+**Show in folder selects the file.** When kakel opens folders and a
+program asks Windows to show a file in its folder, as Firefox does for a
+download, the file is selected. Windows gives kakel only the folder, so
+kakel selects the newest file in it from Windows' Recent items, where
+Firefox puts each download. `-files` also takes a file now, and opens its
+folder with the file selected.
+
+### Fixed
+
+**The file list stays where you scrolled it.** After Page Down, or
+scrolling away with the wheel, the list no longer jumps back to the
+selected row a moment later.
+
+**A long Shift+Down keeps its selection.** Every couple of seconds the
+selection could restart from the row the keyboard was on, dropping the
+rows above it.
+
+**The folder's preview stays still.** With nothing selected, the preview
+of the folder no longer slides in again each time the folder changes.
+
+**Text keeps its width through a theme switch.** Switching to a theme
+with another text size, such as Paper to Phosphor, no longer makes the
+text jump narrower as the switch settles. Text at sizes between whole
+pixels, such as the file list's, was spaced a little too wide and is now
+spaced right.
+
+**A row's text and icon scroll together.** Lists scroll by whole screen
+pixels, so a row's text no longer wavers a pixel against its icon while
+the list slides.
+
 ## v0.12.0-beta.16
 
 ### Added
