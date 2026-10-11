@@ -7,6 +7,44 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.0-beta.19
+
+### Added
+
+**The paste dialog marks lines written for another shell.** Pasting
+bash into PowerShell, PowerShell into the Command Prompt, or either
+into bash, the lines that won't work there get a red line number, a
+wavy line under the part that is wrong, and a short note on what to
+write instead, such as "bash: write $env:NAME = 'value'". The dialog
+says how many lines look written for another shell, and the marks
+follow your edits.
+
+**Settings and About kakel in the launcher.** Win+Shift+K finds them
+by name, and by words like "preferences", "version" and "updates".
+
+### Changed
+
+**The launcher and the command palette use the same words.** Both say
+"Terminal on X", "Files on X" and a favourite by its name, so "files on
+skylake" finds the same thing in either. The palette's old words, such
+as "new file manager", still find them. The palette also lists saved
+servers you aren't connected to.
+
+**This computer's shells go by their names.** Where kakel knows the
+shells here, both boxes list each one by name instead of "Terminal",
+the one a new terminal starts first and marked "default".
+
+**A machine's choices are chips on its line in the launcher.** The
+machine lit shows what can be opened on it at the end of its line, the
+one Enter opens lit. Tab and Shift+Tab, or Right and Left, slide the
+light along them; a click opens one. This replaces the second list Tab
+used to open.
+
+### Removed
+
+**The Updates dialog.** Settings › General › Updates has the same
+choice, beside Beta releases and About kakel.
+
 ## v0.12.0-beta.18
 
 ### Fixed
