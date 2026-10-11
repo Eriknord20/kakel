@@ -11,6 +11,7 @@ import (
 	"github.com/marrasen/kakel/app"
 	"github.com/marrasen/kakel/shellsetup"
 	"github.com/marrasen/kakel/words"
+	"github.com/marrasen/kakel/wrongshell"
 )
 
 // pasteBytes is how large a paste on one line may be before it opens in
@@ -50,15 +51,21 @@ func (w *Window) checkPaste(t *term, s string, u *gunim.UI) bool {
 	// each into Enter on its way all the same.
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
+	kind, running := w.shellKind(t.id), t.sh.T.RunningAProgram()
 	text := widget.NewCodeEditor()
 	text.Label = "Text to paste"
-	text.Highlight = pasteColours(w.shellKind(t.id), t.sh.T.RunningAProgram())
+	text.Highlight = pasteColours(kind, running)
 	text.MaxRows = pasteRows
 	text.SetText(s, nil)
 	d := widget.NewDialog(pasteTitle(s))
 	d.Icon = icon.ClipboardPaste
 	d.Width = pasteWidth
-	says := widget.NewLabel(pasteSays(len(t.alongOthers()), t.sh.T.Bracketed()))
+	along, bracketed := len(t.alongOthers()), t.sh.T.Bracketed()
+	// Lines written for another shell are marked, as an editor marks
+	// mistakes, and counted above the text.
+	marks := pasteSlips(s, kind, running)
+	text.SetMarks(marks, u)
+	says := widget.NewLabel(pasteSays(len(marks), along, bracketed))
 	d.Body = widget.NewForm().Add("", says).Add("", text)
 	d.SetButtons("Paste", "Cancel")
 	d.OnAccept = func(*gunim.UI) gunim.Intent {
@@ -71,9 +78,13 @@ func (w *Window) checkPaste(t *term, s string, u *gunim.UI) bool {
 		t.paste(s)
 		return app.DialogClosed{}
 	}
-	// The title counts the lines as they are edited.
+	// The title counts the lines as they are edited, and the marks
+	// follow the edits.
 	text.OnChange = func(s string, u *gunim.UI) gunim.Intent {
 		d.Title = pasteTitle(s)
+		marks := pasteSlips(s, kind, running)
+		text.SetMarks(marks, u)
+		says.Text = pasteSays(len(marks), along, bracketed)
 		u.Invalidate()
 		return nil
 	}
@@ -111,6 +122,21 @@ func pasteColours(kind shellsetup.Route, programRunning bool) syntax.Highlighter
 	return nil
 }
 
+// pasteSlips marks the lines of a paste written for another shell than
+// kind, the shell it goes to, with how that shell writes them. A paste
+// to a program the shell started, or to a shell not known, is not
+// looked at.
+func pasteSlips(s string, kind shellsetup.Route, programRunning bool) []widget.CodeMark {
+	if programRunning {
+		return nil
+	}
+	var marks []widget.CodeMark
+	for _, slip := range wrongshell.Find(s, kind) {
+		marks = append(marks, widget.CodeMark{Line: slip.Line, Col: slip.Col, End: slip.End, Message: slip.Message})
+	}
+	return marks
+}
+
 // pasteTitle is the paste dialog's title: how many lines, or for one
 // line, how large.
 func pasteTitle(s string) string {
@@ -120,11 +146,18 @@ func pasteTitle(s string) string {
 	return "Paste " + words.Size(int64(len(s)))
 }
 
-// pasteSays is what the paste dialog says above the text: the other
-// panes it reaches, that each line break is Enter where the program
-// takes the paste as typed, and how to start a line.
-func pasteSays(along int, bracketed bool) string {
+// pasteSays is what the paste dialog says above the text: how many
+// lines look written for another shell, the other panes it reaches,
+// that each line break is Enter where the program takes the paste as
+// typed, and how to start a line.
+func pasteSays(slips, along int, bracketed bool) string {
 	var says []string
+	switch {
+	case slips == 1:
+		says = append(says, "1 line looks written for another shell.")
+	case slips > 1:
+		says = append(says, fmt.Sprintf("%d lines look written for another shell.", slips))
+	}
 	if along > 0 {
 		says = append(says, "It also goes to "+words.Count(along, "other pane")+" typing along.")
 	}

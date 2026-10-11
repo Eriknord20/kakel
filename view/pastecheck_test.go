@@ -211,3 +211,48 @@ func TestPasteCheckOffPastesLinesStraightIn(t *testing.T) {
 		t.Fatalf("the pane was sent %q", got)
 	}
 }
+
+// Lines pasted into a shell they were not written for are marked, with
+// what is wrong underlined and how the shell writes it, and counted
+// above the text. An edit that puts a line right takes its mark away.
+func TestAPasteForAnotherShellIsMarked(t *testing.T) {
+	win, sh, publish := windowStage(t)
+	typed := sessiontest.New()
+	quiet := screen.Hooks{Output: func() {}, Title: func(string) {}, Exit: func() {}, Clipboard: func(string) {}}
+	sh.Set("p1", screen.Open(typed, vt.DefaultPalette(), quiet))
+	t.Cleanup(func() { _ = sh.Get("p1").T.Close() })
+	publish(app.State{Panes: []app.Pane{{ID: "p1", Title: "Terminal 1", ShellKind: shellsetup.PowerShell}},
+		Stage: &app.Box{Pane: "p1"}, Focus: "p1", PasteCheck: true})
+	lastUI.SetClipboard("cd project\nexport GOOS=windows\ngo build ./... 2>/dev/null")
+	win.terms["p1"].pasteClipboard(lastUI)
+	frames(5)
+	area := pasteArea(t, win)
+	marks := area.Marks()
+	if len(marks) != 2 || marks[0].Line != 2 || marks[0].Col != 1 || marks[0].End != 7 || marks[1].Line != 3 {
+		t.Fatalf("the marks are %+v, want export on line 2 and /dev/null on line 3", marks)
+	}
+	if !strings.Contains(marks[0].Message, "$env:") {
+		t.Fatalf("the mark says %q, not how PowerShell writes it", marks[0].Message)
+	}
+	var says *widget.Label
+	for _, c := range formOf(win.dialog.Body).Children() {
+		if l, ok := c.(*widget.Label); ok && strings.Contains(l.Text, "Shift+Enter") {
+			says = l
+		}
+	}
+	if says == nil {
+		t.Fatal("the dialog says nothing above the text")
+	}
+	if !strings.HasPrefix(says.Text, "2 lines look written for another shell.") {
+		t.Fatalf("the dialog says %q", says.Text)
+	}
+	area.SetText("cd project\n$env:GOOS = 'windows'\ngo build ./... 2>/dev/null", lastUI)
+	lastWindow.Input(gi.TextInput{Text: " "})
+	frames(5)
+	if marks := area.Marks(); len(marks) != 1 || marks[0].Line != 3 {
+		t.Fatalf("put right, the marks are %+v, want /dev/null's alone", marks)
+	}
+	if !strings.HasPrefix(says.Text, "1 line looks") {
+		t.Fatalf("put right, the dialog says %q", says.Text)
+	}
+}
