@@ -11,6 +11,7 @@ import (
 	"github.com/marrasen/gunim/widget"
 
 	"github.com/marrasen/kakel/app"
+	"github.com/marrasen/kakel/settings"
 )
 
 // The Settings pane shows the sounds, the rings and the switches as
@@ -24,6 +25,7 @@ func TestTheSettingsPaneShowsAndSaves(t *testing.T) {
 	st.Update = app.Update{Installed: true, Autostart: true, Updates: "install"}
 	st.Themes, st.Theme = []string{"Dark", "Light"}, "Light"
 	st.FontSize = 17
+	st.LauncherFiles = settings.LauncherFilesWindow
 	publish(st)
 	p := win.settings
 	if p == nil {
@@ -32,6 +34,9 @@ func TestTheSettingsPaneShowsAndSaves(t *testing.T) {
 	if !p.tray.Checked() || !p.autostart.Checked() || !p.titleBar.Checked() || p.updates.Selected() != 1 || p.theme.Selected() != 1 || p.size.Value() != 17 {
 		t.Fatalf("the pane shows tray %v, autostart %v, title bar %v, updates %d, theme %d, size %v",
 			p.tray.Checked(), p.autostart.Checked(), p.titleBar.Checked(), p.updates.Selected(), p.theme.Selected(), p.size.Value())
+	}
+	if p.launcherFiles.Selected() != 2 {
+		t.Fatalf("set to open files in a window, the pane shows choice %d", p.launcherFiles.Selected())
 	}
 	boxes := []*widget.Checkbox{p.iface}
 	for i := range p.sounds {

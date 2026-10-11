@@ -79,6 +79,10 @@ type (
 	// SetLauncherKey makes Key the launcher's, written as a shortcut
 	// is, "none" for none, or "" for the one kakel comes with.
 	SetLauncherKey struct{ Key string }
+	// SetLauncherFiles keeps where files from the launcher or the tray
+	// open: settings.LauncherFilesTab, LauncherFilesBeside or
+	// LauncherFilesWindow.
+	SetLauncherFiles struct{ Where string }
 )
 
 // setLauncherKey takes the launcher's key, and keeps it once it has:

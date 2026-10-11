@@ -93,6 +93,10 @@ type stored struct {
 	// LauncherKey is the key, from any program, that opens the
 	// launcher, as a shortcut is written; "none" takes none.
 	LauncherKey string `json:"launcherKey,omitempty"`
+	// LauncherFiles is where files asked for from the launcher or the
+	// tray open: LauncherFilesTab, as when empty, LauncherFilesBeside
+	// or LauncherFilesWindow.
+	LauncherFiles string `json:"launcherFiles,omitempty"`
 	// StartFolder is where a new terminal on this computer starts when
 	// nothing names another folder; empty for the home folder.
 	// LocalFolders are folders on this computer that were worth opening
@@ -1165,6 +1169,42 @@ func (s *Settings) PutServeAtStart(what string) error {
 	}
 	before := s.have
 	s.have.ServeAtStart = what
+	if err := s.saveLocked(); err != nil {
+		s.have = before
+		return err
+	}
+	return nil
+}
+
+// Where files asked for from the launcher or the tray open.
+const (
+	// LauncherFilesTab opens them in a tab of the window last worked in.
+	LauncherFilesTab = ""
+	// LauncherFilesBeside opens them there too, in a split beside the
+	// file manager with the keyboard, when one has it.
+	LauncherFilesBeside = "beside"
+	// LauncherFilesWindow opens them in a window of their own.
+	LauncherFilesWindow = "window"
+)
+
+// LauncherFiles is where files asked for from the launcher or the tray
+// open: LauncherFilesTab, LauncherFilesBeside or LauncherFilesWindow.
+func (s *Settings) LauncherFiles() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.have.LauncherFiles
+}
+
+// PutLauncherFiles keeps where files from the launcher or the tray
+// open, and saves.
+func (s *Settings) PutLauncherFiles(where string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.rereadLocked(); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnsaveable, err)
+	}
+	before := s.have
+	s.have.LauncherFiles = where
 	if err := s.saveLocked(); err != nil {
 		s.have = before
 		return err

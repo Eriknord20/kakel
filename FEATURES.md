@@ -99,7 +99,10 @@ The whole list. The [README](README.md) has the short version.
   opened there last since kakel started, a terminal at first, in the
   window you last worked in; Tab lists the rest, as Files and, while
   connected, the Connection Log, and Escape goes back and then closes
-  it. Settings › General › Launcher key sets another key with Ctrl, Alt or Win in
+  it. Files from the launcher or the tray open in a new tab of that
+  window; Settings › General › Files open in can split them beside its
+  file manager instead, or give them a window of their own.
+  Settings › General › Launcher key sets another key with Ctrl, Alt or Win in
   it, or none; kakel says so if another program has it. Open Launcher,
   on the Machines menu and the tray's, opens it anywhere, and so does
   `kakel -launcher`, for a key bound in the desktop's own settings

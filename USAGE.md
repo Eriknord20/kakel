@@ -198,7 +198,10 @@ gridterm's old directories: `gridterm` becomes `kakel`, and
 The file manager is a pane, like a terminal: split it, put it in a tab,
 or drag it to another window. Files on a server's card, or the Files
 command, opens one beside the file manager in front; Files in a New
-Window opens one in a window of its own. Opening a folder from Windows,
+Window opens one in a window of its own. Files from the launcher or the
+tray opens a new tab in the window you last worked in; Settings ›
+General › Files open in can make it split beside the file manager
+there, or open a window of its own. Opening a folder from Windows,
 once kakel opens folders, opens a window with one. A window of file
 managers alone opens where the last one was, and as big, as it closed.
 

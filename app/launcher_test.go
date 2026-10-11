@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/marrasen/kakel/machines"
+	"github.com/marrasen/kakel/settings"
 	shellfind "github.com/marrasen/kakel/shells"
 	"github.com/marrasen/kakel/single"
 
@@ -284,6 +285,46 @@ func TestFilesFromTheTrayOpenInTheWindowWorkedIn(t *testing.T) {
 	waitFor(t, a, "a window holding the files", func() bool { return opened.Load() == 1 && len(files.opened) == 2 })
 	if p := a.st.Panes[len(a.st.Panes)-1]; p.Kind != KindFileManager || files.opened[1].Dir != "/tmp" || a.ownerOf(p.ID) == nil || a.ownerOf(p.ID).gone {
 		t.Fatalf("with no window, the files opened as %+v at %q", p, files.opened[1].Dir)
+	}
+}
+
+// Files from the launcher open in a tab of the window worked in, even
+// with a file manager there in front; beside it, or in a window of their
+// own, where the settings say.
+func TestFilesFromTheLauncherOpenWhereTheSettingsSay(t *testing.T) {
+	a, _, two := twoWindowApp(t)
+	a.traySet = (&fakeTray{}).tray()
+	a.settings = mustSettings(t)
+	files := newFakeFiles(t)
+	a.files = files
+	a.next = 100
+	a.publish()
+	var opened atomic.Int32
+	a.openWindow = func(_ *gunim.Window, _ geom.Point, s geom.Size, _ *driver.Placement) (gunim.Client, *gunim.Window, error) {
+		opened.Add(1)
+		w := gunimtest.New(t, s, nil)
+		return w.Client(), w, nil
+	}
+	a.handleLaunch(Launch{Action: "files"})
+	if p := a.st.Focus; a.ownerOf(p) != two || a.kindOfPane(p) != KindFileManager || p == "p3" || a.groupOf[p] == a.groupOf["p3"] {
+		t.Fatalf("files from the launcher opened as %q in group %d, beside p3 in %d", p, a.groupOf[p], a.groupOf["p3"])
+	}
+
+	a.focus("p3")
+	a.handle(SetLauncherFiles{Where: settings.LauncherFilesBeside})
+	if got := a.settings.LauncherFiles(); got != settings.LauncherFilesBeside {
+		t.Fatalf("the settings keep files opening %q", got)
+	}
+	a.handleLaunch(Launch{Action: "files"})
+	if p := a.st.Focus; a.ownerOf(p) != two || p == "p3" || a.groupOf[p] != a.groupOf["p3"] {
+		t.Fatalf("set to open beside, files opened as %q in group %d, not p3's %d", p, a.groupOf[p], a.groupOf["p3"])
+	}
+
+	a.handle(SetLauncherFiles{Where: settings.LauncherFilesWindow})
+	a.handleLaunch(Launch{Action: "files"})
+	waitFor(t, a, "a window holding the files", func() bool { return opened.Load() == 1 && len(files.opened) == 3 })
+	if p := a.st.Panes[len(a.st.Panes)-1]; p.Kind != KindFileManager || a.ownerOf(p.ID) == two {
+		t.Fatalf("set to open in a window, files opened as %+v in the window worked in", p)
 	}
 }
 

@@ -88,6 +88,10 @@ type State struct {
 	InTray bool
 	// LauncherKey is the launcher's key, as written.
 	LauncherKey string
+	// LauncherFiles is where files from the launcher or the tray open:
+	// settings.LauncherFilesTab, LauncherFilesBeside or
+	// LauncherFilesWindow.
+	LauncherFiles string
 	// Update is where kakel stands on installing and updating.
 	Update Update
 	// Sounds and Rings are the events kakel tells of by a sound and by
@@ -1148,6 +1152,8 @@ func failedTitle(in gunim.Intent) string {
 		return "Couldn't save This Computer's settings"
 	case SetLauncherKey:
 		return "Couldn't change the launcher's key"
+	case SetLauncherFiles:
+		return "Couldn't save where files open"
 	case InstallKakel:
 		return "Couldn't install kakel"
 	case AllowKey:
@@ -1263,6 +1269,7 @@ func (a *app) publish() {
 	}
 	st.InTray = a.trayWanted()
 	st.LauncherKey = a.launcherKey()
+	st.LauncherFiles = a.launcherFiles()
 	st.Working = ""
 	if a.work != nil && !a.work.gone {
 		st.Working = a.focusIn(a.work)
@@ -1663,6 +1670,10 @@ func (a *app) handle(in gunim.Intent) {
 
 	case SetLauncherKey:
 		err = a.setLauncherKey(in.Key)
+	case SetLauncherFiles:
+		if a.settings != nil {
+			err = a.settings.PutLauncherFiles(in.Where)
+		}
 	case ToggleTray:
 		if a.settings != nil {
 			if err := a.settings.PutTray(!a.settings.Tray()); err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/marrasen/kakel/appicon"
 	"github.com/marrasen/kakel/machines"
+	"github.com/marrasen/kakel/settings"
 	"github.com/marrasen/kakel/single"
 
 	"github.com/marrasen/gunim"
@@ -267,10 +268,29 @@ func (a *app) toTray(f func()) {
 }
 
 // filesFromOutside opens the files on m, at path or at home, as asked
-// from outside kakel's windows, by the tray or the launcher: in a file
-// manager pane of the window worked in.
+// from outside kakel's windows, by the tray or the launcher: where the
+// settings say, in a tab of the window worked in as at first.
 func (a *app) filesFromOutside(m machines.ID, path string) {
-	a.toTray(func() { a.handle(OpenFilesOn{Machine: m, Path: path}) })
+	switch a.launcherFiles() {
+	case settings.LauncherFilesWindow:
+		if err := a.openFileManager(m, path); err != nil {
+			a.failed("Couldn't open the files on "+a.machines.Name(m), err.Error())
+		}
+	case settings.LauncherFilesBeside:
+		a.toTray(func() { a.handle(OpenFilesOn{Machine: m, Path: path}) })
+	default:
+		// A tab, not a split: the pane that had the keyboard there may
+		// be one the user has not looked at for a while.
+		a.toTray(func() { a.handle(OpenFilesOn{Machine: m, Path: path, NewTab: true}) })
+	}
+}
+
+// launcherFiles is where files from the launcher or the tray open.
+func (a *app) launcherFiles() string {
+	if a.settings == nil {
+		return settings.LauncherFilesTab
+	}
+	return a.settings.LauncherFiles()
 }
 
 // newWindow opens a window, brings it to the front, and does f in it.

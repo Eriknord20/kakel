@@ -37,6 +37,12 @@ var updateChoices = []struct{ title, value string }{
 	{"Tell me", settings.UpdatesNotify}, {"Install them", settings.UpdatesInstall}, {"Off", settings.UpdatesOff},
 }
 
+// launcherFilesChoices are where files from the launcher or the tray
+// open, as Settings lists them and writes them.
+var launcherFilesChoices = []struct{ title, value string }{
+	{"New tab", settings.LauncherFilesTab}, {"Beside", settings.LauncherFilesBeside}, {"New window", settings.LauncherFilesWindow},
+}
+
 // settingsTabs are the pane's tabs, in order, and their icons.
 var settingsTabs = []struct {
 	title string
@@ -77,6 +83,7 @@ type settingsPane struct {
 	autostart, tray, folders, titleBar, beta *widget.Switch
 	foldersRow, installRow                   *maybeShown
 	launcher                                 *savedLine
+	launcherFiles                            *widget.Segmented
 	updates                                  *widget.Dropdown
 
 	// Appearance.
@@ -278,6 +285,14 @@ func (p *settingsPane) general() gunim.Node {
 		}
 		return ""
 	}, func(s string) gunim.Intent { return app.SetLauncherKey{Key: s} })
+	where := make([]string, len(launcherFilesChoices))
+	for i, c := range launcherFilesChoices {
+		where[i] = c.title
+	}
+	p.launcherFiles = widget.NewSegmented(where...)
+	p.launcherFiles.OnChange = func(i int, u *gunim.UI) gunim.Intent {
+		return app.SetLauncherFiles{Where: launcherFilesChoices[max(0, min(i, len(launcherFilesChoices)-1))].value}
+	}
 	titles := make([]string, len(updateChoices))
 	for i, c := range updateChoices {
 		titles[i] = c.title
@@ -301,9 +316,11 @@ func (p *settingsPane) general() gunim.Node {
 		settingRow("Show kakel in the tray", "Closing the last window leaves kakel there, with its launcher key.", p.tray),
 	}
 	rows = append(rows, p.foldersRow)
-	rows = append(rows, settingRow("Launcher key", "Opens the launcher from any program. Super is the Windows key; none takes no key.", p.launcher.node))
 	return settingsPage(
 		settingsSection("Startup", rows...),
+		settingsSection("Launcher",
+			settingRow("Launcher key", "Opens the launcher from any program. Super is the Windows key; none takes no key.", p.launcher.node),
+			settingRow("Files open in", "Files from the launcher or the tray. Beside splits the last pane you used, if it is a file manager.", p.launcherFiles)),
 		settingsSection("Windows",
 			settingRow("Use the system's title bar", "The title bar your window manager draws, with its own buttons, for the windows opened from now on.", p.titleBar)),
 		settingsSection("Updates",
@@ -543,6 +560,11 @@ func (p *settingsPane) show(st app.State, u *gunim.UI) {
 	p.foldersRow.set(st.Update.FoldersHere, u)
 	setOn(p.titleBar, st.SystemTitleBar)
 	p.launcher.show(st.LauncherKey, u)
+	for i, c := range launcherFilesChoices {
+		if c.value == st.LauncherFiles && p.launcherFiles.Selected() != i {
+			p.launcherFiles.SetSelected(i, u)
+		}
+	}
 	for i, c := range updateChoices {
 		if c.value == st.Update.Updates {
 			p.updates.SetSelected(i, nil)
