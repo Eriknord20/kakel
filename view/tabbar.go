@@ -634,26 +634,17 @@ func (b *tabBar) paintTab(p *paint.Painter, th *theme.Live, t app.Tab, title, mo
 		more.Paint(p, geom.Pt(stop-more.Advance, mid-more.Height()/2), mc)
 		stop -= more.Advance + 6
 	}
-	if stop > x {
-		func() {
-			room := stop - x
-			if l.at >= 0 && l.at < len(b.titles) {
-				var cut bool
-				title, cut = b.fitTitle(l.at, room)
-				if l.at < len(b.cut) {
-					b.cut[l.at] = cut
-				}
+	if room := stop - x; room > 0 {
+		if l.at >= 0 && l.at < len(b.titles) {
+			var cut bool
+			title, cut = b.fitTitle(l.at, room)
+			if l.at < len(b.cut) {
+				b.cut[l.at] = cut
 			}
-			// What passes the room fades out, rather than stopping
-			// short at its edge.
-			fade := float32(0)
-			if title.Advance > room {
-				fade = min(widget.ScrollFade.Get(th), room/2)
-			}
-			defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(x, r.Min.Y, room, r.Size().H), Opacity: 1, Clip: true,
-				Fade: geom.Insets{Right: fade}})()
-			title.Paint(p, geom.Pt(x, mid-title.Height()/2), c)
-		}()
+		}
+		// What passes the room fades out, rather than stopping short at
+		// its edge.
+		title.PaintFaded(p, geom.Pt(x, mid-title.Height()/2), c, room, widget.TextFade.Get(th))
 	}
 	if l.cross {
 		cc := faint
