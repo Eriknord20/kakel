@@ -151,7 +151,7 @@ func (a *app) forgetFavourites(machine machines.ID) {
 		return
 	}
 	if err := a.settings.PutFavourites(left); err != nil {
-		a.failed("Couldn't forget the favourites on "+a.machines.Name(machine), err.Error())
+		a.failed("Couldn't remove the favourites on "+a.machines.Name(machine), err.Error())
 		return
 	}
 	a.showFavourites()

@@ -129,7 +129,7 @@ func (a *app) openTunnel(in OpenTunnel) error {
 			}
 		case slices.ContainsFunc(a.settings.Tunnels(), saved.Same):
 			if err := a.settings.DropTunnel(saved); err != nil {
-				a.failed("Couldn't forget the tunnel", err.Error())
+				a.failed("Couldn't remove the tunnel", err.Error())
 			}
 		}
 		a.st.SavedTunnels = a.settings.Tunnels()

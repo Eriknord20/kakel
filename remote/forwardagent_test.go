@@ -187,7 +187,7 @@ func TestWhyThereIsNoAgentToCarrySaysWhich(t *testing.T) {
 		},
 		"given up on earlier": {
 			a:    &auth{noAgent: gaveUp, agentBroke: true},
-			want: "Forget unlocked keys",
+			want: "Lock SSH Keys has it asked again",
 		},
 		"none running": {
 			a:    &auth{noAgent: errors.New("SSH_AUTH_SOCK is not set")},

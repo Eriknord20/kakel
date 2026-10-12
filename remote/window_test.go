@@ -306,7 +306,7 @@ func TestFindingAKeySaysWhatItLookedAt(t *testing.T) {
 	account := strings.Join(said, "\n")
 	for _, want := range []string{
 		"leaving the SSH agent alone",
-		"Forget unlocked keys",
+		"Lock SSH Keys has it asked again",
 		"private keys with no passphrase: 1",
 		"private keys that need one: 0",
 	} {

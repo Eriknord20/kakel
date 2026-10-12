@@ -322,7 +322,7 @@ func (a *auth) noAgentToCarry(cfg Config) error {
 		return errors.New("the SSH agent is turned off for this connection")
 	case a.agentBroke:
 		return fmt.Errorf("the SSH agent was given up on earlier: %w."+
-			" Forget unlocked keys to have it asked again", a.noAgent)
+			" Lock SSH Keys has it asked again", a.noAgent)
 	case a.noAgent != nil:
 		return fmt.Errorf("there is no SSH agent running here: %w", a.noAgent)
 	case gone:
@@ -350,7 +350,7 @@ func authMethods(ctx context.Context, cfg Config) (*auth, error) {
 		// cost this connection the same wait for the same answer.
 		a.noAgent, a.agentBroke = why, true
 		saySo(cfg.Saying, "leaving the SSH agent alone: "+why.Error()+
-			". Forget unlocked keys to have it asked again")
+			". Lock SSH Keys has it asked again")
 	default:
 		open := cfg.agent
 		if open == nil {

@@ -69,7 +69,7 @@ func (a *app) runCommandThen(in RunCommand, then func(id string, err error)) err
 	}
 	if in.Forget != "" && !in.Keep && a.settings != nil {
 		if err := a.settings.DropCommand(in.Forget); err != nil {
-			a.failed("Couldn't forget the command", err.Error())
+			a.failed("Couldn't remove the command", err.Error())
 		}
 		a.st.SavedCommands = a.settings.Commands()
 	}

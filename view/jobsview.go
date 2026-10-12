@@ -357,7 +357,7 @@ func (p *copiesPane) show(saved []settings.SavedCopy, u *gunim.UI) {
 		p.bar.set("None saved. A finished copy has a Save this copy box.", u)
 		return
 	}
-	p.bar.set(words.Count(len(saved), "copy")+" saved · Enter does the one selected again, Delete forgets it", u)
+	p.bar.set(words.Count(len(saved), "copy")+" saved · Enter does the one selected again, Delete removes it", u)
 }
 
 // Children implements [gunim.Composite].

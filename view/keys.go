@@ -441,7 +441,7 @@ var commandAlso = map[string][]string{
 	"server.add":            {"new", "save"},
 	"server.import":         {"ssh config", "~/.ssh/config", "openssh", "hosts"},
 	"server.reload":         {"reread"},
-	"files.copies":          {"remembered", "file", "again", "repeat"},
+	"files.copies":          {"saved", "file", "again", "repeat"},
 	"serve.window":          {"share", "listen", "remote"},
 	"serve.attach":          {"another", "attach", "take over", "remote", "share panes"},
 	"agent.hand":            {"hand over", "add this pane to the share"},
