@@ -3,6 +3,7 @@ package secrets
 import (
 	"bytes"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -24,7 +25,9 @@ func TestLockAfterIsSealedIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(raw, []byte("lockAfter")) || bytes.Contains(raw, []byte("900")) {
+	// 900 as a value in the JSON, after a colon: the sealed parts are
+	// base64, which has no colon, and may hold "900" by chance.
+	if bytes.Contains(raw, []byte("lockAfter")) || regexp.MustCompile(`:\s*900\b`).Match(raw) {
 		t.Errorf("the time to lock after is in the file in the clear:\n%s", raw)
 	}
 
