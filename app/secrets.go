@@ -48,6 +48,9 @@ type Secrets struct {
 	// Editing is a secret to change, with its value, for the window
 	// that asked to show it in a form once.
 	Editing []SecretEdit
+	// LockAfter is how long the secrets may go unused before they lock
+	// themselves, 0 for never. Known only while they are open.
+	LockAfter time.Duration
 }
 
 // SecretEdit is a secret to change, with what is saved in it, sent to
@@ -109,6 +112,9 @@ type (
 	SecretEditShown struct{ Seq uint64 }
 	// RevealSecret shows a secret in a dialog.
 	RevealSecret struct{ ID string }
+	// SetSecretsLockAfter changes how long the secrets may go unused
+	// before they lock themselves: 0 for never.
+	SetSecretsLockAfter struct{ After time.Duration }
 )
 
 // KindSecrets is the secrets pane.
@@ -136,6 +142,7 @@ func (a *app) vault() (*secrets.Vault, error) {
 		return nil, err
 	}
 	a.secrets = v
+	go a.lockWhenUnused()
 	return v, nil
 }
 
@@ -336,7 +343,7 @@ const vaultSettles = time.Second
 
 // secretsSame reports whether two readings of the vault show the same.
 func secretsSame(x, y Secrets) bool {
-	return x.Exists == y.Exists && x.Open == y.Open && x.Passphrase == y.Passphrase &&
+	return x.Exists == y.Exists && x.Open == y.Open && x.Passphrase == y.Passphrase && x.LockAfter == y.LockAfter &&
 		slices.EqualFunc(x.Items, y.Items, func(a, b SecretItem) bool {
 			return a.ID == b.ID && a.Name == b.Name && a.User == b.User && a.File == b.File && a.Kind == b.Kind &&
 				slices.Equal(a.Logins, b.Logins)
@@ -361,6 +368,9 @@ func (a *app) showVault() {
 			key.Removing = vaultkeys.RemovingCosts(v, k)
 			s.Keys = append(s.Keys, key)
 		}
+		// After Items, which has just read the file: a time another
+		// window set is in by now.
+		s.LockAfter = v.LockAfter()
 	}
 	a.st.Secrets = s
 }
@@ -613,12 +623,71 @@ func (a *app) kindOfPane(id string) string {
 	return ""
 }
 
+// lockWhenUnused locks the secrets once they have gone unused for as
+// long as they say they may. It runs for as long as the program does,
+// and looks every few seconds: the vault does the counting.
+//
+// The look is made on the program's own goroutine, as a.secrets is
+// replaced when a vault is created.
+func (a *app) lockWhenUnused() {
+	tick := time.NewTicker(lockLooks)
+	defer tick.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-tick.C:
+		}
+		select {
+		case <-a.ctx.Done():
+			return
+		case a.events <- a.lockIfUnused:
+		}
+	}
+}
+
+// lockIfUnused locks the secrets when they have gone unused too long.
+func (a *app) lockIfUnused() {
+	v := a.secrets
+	after := v.LockAfter()
+	if after == 0 || v.Unused() < after {
+		// Nothing has changed, so there is nothing to show.
+		a.quiet = true
+		return
+	}
+	if a.lockSecretsQuietly() {
+		log.Printf("Secrets locked: unused for %s. A key the SSH agent holds opens them again without a passphrase.", words.Duration(after))
+	} else {
+		log.Printf("Secrets locked: unused for %s", words.Duration(after))
+	}
+}
+
+// lockLooks is how often lockWhenUnused looks, and so how late it may
+// lock.
+var lockLooks = 5 * time.Second
+
+// setSecretsLockAfter changes how long the secrets may go unused.
+func (a *app) setSecretsLockAfter(after time.Duration) {
+	a.withSecrets("Couldn't change when the secrets lock", func(v *secrets.Vault) error {
+		return v.SetLockAfter(after)
+	})
+}
+
 // lockSecrets locks the vault. What is on disk stays.
 func (a *app) lockSecrets() {
+	if a.lockSecretsQuietly() {
+		a.notice(NoticePlain, "Secrets locked", "The SSH agent holds a key that opens them, so they open again without a passphrase while it does.", "")
+	}
+}
+
+// lockSecretsQuietly locks the vault as lockSecrets does, and says
+// whether a key the SSH agent holds still opens it, for the caller to
+// tell or not.
+func (a *app) lockSecretsQuietly() (agentOpens bool) {
 	v := a.secrets
 	if v == nil {
 		a.showVault()
-		return
+		return false
 	}
 	v.Lock()
 	// The keys that open them go too, unlocked as they are: kept, they
@@ -632,9 +701,10 @@ func (a *app) lockSecrets() {
 		// Still opened by a key the SSH agent holds, which kakel cannot
 		// make ask again: said, and locked all the same.
 		v.Lock()
-		a.notice(NoticePlain, "Secrets locked", "The SSH agent holds a key that opens them, so they open again without a passphrase while it does.", "")
+		agentOpens = true
 	}
 	a.showVault()
+	return agentOpens
 }
 
 // Intents for what opens the secrets.

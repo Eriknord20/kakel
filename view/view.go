@@ -653,7 +653,7 @@ func (w *Window) run(id string, u *gunim.UI) bool {
 	case "agent.take":
 		u.Send(w, app.UnsharePane{Pane: w.focused})
 		return true
-	case "secrets.change", "secrets.forget", "secrets.removeKey", "secrets.addPassphrase":
+	case "secrets.change", "secrets.forget", "secrets.removeKey", "secrets.addPassphrase", "secrets.autoLock":
 		w.secretsCommand(id, u)
 		return true
 	case "secrets.export":
@@ -918,6 +918,8 @@ func (w *Window) secretsCommand(id string, u *gunim.UI) {
 		}
 		keys := st.Keys
 		w.chooseFrom("Which key?", choices, func(i int, u *gunim.UI) { w.confirmRemoveKey(st, keys[i], u) }, u)
+	case "secrets.autoLock":
+		w.autoLockForm(st, u)
 	case "secrets.addPassphrase":
 		if st.Passphrase {
 			w.toast(widget.Toast{Title: "The secrets already take a passphrase", Body: "Remove Secrets Key takes it away first."}, u)

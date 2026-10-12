@@ -1462,6 +1462,8 @@ func (a *app) handle(in gunim.Intent) {
 		a.withSecrets("Couldn't open the secrets", func(*secrets.Vault) error { return nil })
 	case LockSecrets:
 		a.lockSecrets()
+	case SetSecretsLockAfter:
+		a.setSecretsLockAfter(in.After)
 	case PutSecret:
 		a.putSecret(in)
 	case RemoveSecret:

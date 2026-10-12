@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Count writes n things, with the plural where it takes one.
@@ -23,6 +24,18 @@ func ManyOf(n int, one, many string) string {
 		return "1 " + one
 	}
 	return strconv.Itoa(n) + " " + many
+}
+
+// Duration writes a length of time in the largest whole unit it comes
+// to: "1 hour", "90 minutes", "45 seconds".
+func Duration(d time.Duration) string {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		return Count(int(d/time.Hour), "hour")
+	case d >= time.Minute && d%time.Minute == 0:
+		return Count(int(d/time.Minute), "minute")
+	}
+	return Count(int(d/time.Second), "second")
 }
 
 // Size writes a size in bytes the way a person reads it.

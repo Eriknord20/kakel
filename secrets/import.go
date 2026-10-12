@@ -196,6 +196,7 @@ func (v *Vault) Import(in []Export, dup Duplicates) (added, skipped int, err err
 		return 0, 0, ErrLocked
 	}
 	v.refresh()
+	v.touch()
 	was := slices.Clone(v.items)
 	now := v.now()
 	for _, e := range in {

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/marrasen/kakel/app"
 	"github.com/marrasen/kakel/conf"
@@ -42,10 +43,10 @@ type secretsPane struct {
 	st   app.Secrets
 	byID map[widget.Key]app.SecretItem
 	// The header's buttons and the bar's.
-	add, note, lock, unlock         *widget.Button
-	typ, cp, reveal, change, remove *widget.Button
-	addKey, addPass, removeKey      *widget.Button
-	keyNames                        map[widget.Key]app.SecretKey
+	add, note, lock, unlock, autoLock *widget.Button
+	typ, cp, reveal, change, remove   *widget.Button
+	addKey, addPass, removeKey        *widget.Button
+	keyNames                          map[widget.Key]app.SecretKey
 }
 
 // Handle implements [gunim.Handler]: the keyboard coming into the pane
@@ -91,6 +92,9 @@ func newSecretsPane(w *Window) *secretsPane {
 	p.typ, p.cp, p.reveal = button(icon.Keyboard, "Type"), button(icon.Copy, "Copy"), button(icon.Eye, "Show")
 	p.change, p.remove = button(icon.Pencil, "Edit"), button(icon.Trash2, "Remove")
 	p.lock.OnClick, p.unlock.OnClick = widget.Sends(app.LockSecrets{}), widget.Sends(app.UnlockSecrets{})
+	p.autoLock = button(icon.Timer, "")
+	p.autoLock.Tooltip = "How long the secrets stay open while nothing uses them"
+	p.autoLock.OnClick = func(u *gunim.UI) gunim.Intent { p.w.autoLockForm(p.st, u); return nil }
 	p.add.OnClick = func(u *gunim.UI) gunim.Intent { p.w.secretForm(secrets.Password, nil, "", u); return nil }
 	p.note.OnClick = func(u *gunim.UI) gunim.Intent { p.w.secretForm(secrets.Note, nil, "", u); return nil }
 	onRow := func(b *widget.Button, do func(app.SecretItem, *gunim.UI)) {
@@ -170,6 +174,10 @@ func (p *secretsPane) show(st app.Secrets, u *gunim.UI) {
 	if st.TypeInto != "" {
 		p.typ.Label, p.typ.Disabled, p.typ.Tooltip = "Type into "+shortened(st.TypeIntoTitle, typeIntoLongest), false, ""
 	}
+	p.autoLock.Label = "Auto-lock: off"
+	if st.LockAfter > 0 {
+		p.autoLock.Label = "Auto-lock: " + words.Duration(st.LockAfter)
+	}
 	if st.Open {
 		p.opens.set("What opens them", u, p.addKey, p.addPass, p.removeKey)
 	} else {
@@ -180,10 +188,10 @@ func (p *secretsPane) show(st app.Secrets, u *gunim.UI) {
 		p.head.set("Secrets", u, p.unlock)
 		p.act.set("Locked", u)
 	case len(st.Items) == 0:
-		p.head.set(secretsHeading(st), u, p.add, p.note, p.lock)
+		p.head.set(secretsHeading(st), u, p.add, p.note, p.lock, p.autoLock)
 		p.act.set("No secrets yet", u)
 	default:
-		p.head.set(secretsHeading(st), u, p.add, p.note, p.lock)
+		p.head.set(secretsHeading(st), u, p.add, p.note, p.lock, p.autoLock)
 		switch shown := len(keys); {
 		case shown == len(st.Items):
 			p.act.set(words.Count(len(st.Items), "secret")+" · Enter copies the one selected", u, p.typ, p.cp, p.reveal, p.change, p.remove)
@@ -367,6 +375,44 @@ func (w *Window) passphraseForm(st app.Secrets, u *gunim.UI) {
 		return ""
 	}
 	d.OnAccept = func(u *gunim.UI) gunim.Intent { return app.AddSecretsPassphrase{Passphrase: pass.Text()} }
+	d.OnDismiss = widget.Sends(app.DialogClosed{})
+	w.openDialog(d, u)
+}
+
+// autoLockChoices are the times the secrets may be left unused before
+// they lock themselves, the first being never.
+var autoLockChoices = []time.Duration{0, time.Minute, 5 * time.Minute, 15 * time.Minute,
+	30 * time.Minute, time.Hour, 4 * time.Hour, 8 * time.Hour}
+
+// autoLockForm asks how long the secrets may go unused before they lock
+// themselves.
+func (w *Window) autoLockForm(st app.Secrets, u *gunim.UI) {
+	choices := slices.Clone(autoLockChoices)
+	if !slices.Contains(choices, st.LockAfter) {
+		// A time set some other way is kept on offer, so opening this
+		// and pressing Save does not change it.
+		choices = append(choices, st.LockAfter)
+		slices.Sort(choices)
+	}
+	titles := make([]string, len(choices))
+	for i, c := range choices {
+		titles[i] = "Never"
+		if c > 0 {
+			titles[i] = words.Duration(c)
+		}
+	}
+	pick := widget.NewDropdown(widget.Labels(titles...))
+	pick.Label = "Lock when unused for"
+	pick.SetSelected(slices.Index(choices, st.LockAfter), nil)
+	d := widget.NewDialog("Auto-Lock Secrets")
+	d.Body = widget.NewForm().
+		Add("", widget.NewLabel("Copying, typing, showing or changing a secret counts as using them, and so does signing in with one. Locking forgets the SSH keys that open them, as Lock does.")).
+		Add("Lock when unused for", pick).
+		Add("", widget.NewLabel("Kept inside the secrets, so only someone who can open them can change it."))
+	d.SetButtons("Save", "Cancel")
+	d.OnAccept = func(u *gunim.UI) gunim.Intent {
+		return app.SetSecretsLockAfter{After: choices[max(0, min(pick.Selected(), len(choices)-1))]}
+	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
 }

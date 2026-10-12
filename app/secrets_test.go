@@ -471,3 +471,48 @@ func TestTheSecretsGetAWindowOfTheirOwn(t *testing.T) {
 		t.Fatalf("asked for again, the secrets are in window %d, window %d in front, raised %d times", a.ownerOf(id).id, a.cur.id, opened.Offscreen().Raised())
 	}
 }
+
+// Secrets told to lock after a second unused lock themselves, and the
+// key that opened them is let go, so the next use asks again.
+func TestUnusedSecretsLockThemselves(t *testing.T) {
+	was := lockLooks
+	lockLooks = 20 * time.Millisecond
+	t.Cleanup(func() { lockLooks = was })
+	a, _ := secretsApp(t)
+	startVault(t, a)
+	a.handle(SetSecretsLockAfter{After: time.Second})
+	if got := a.st.Secrets.LockAfter; got != time.Second {
+		t.Fatalf("the secrets lock after %v, want 1s", got)
+	}
+	waitFor(t, a, "the secrets to lock", func() bool { return a.secrets.Locked() })
+	if a.secrets.Unlock(a.ring.Signers()) == nil {
+		t.Error("locked by the time, a key still in hand opens them again without asking")
+	}
+	if a.st.Secrets.Open {
+		t.Error("locked, the pane still shows them open")
+	}
+}
+
+// Never, which is what a vault starts with, leaves them open.
+func TestSecretsWithNoTimeStayOpen(t *testing.T) {
+	was := lockLooks
+	lockLooks = 20 * time.Millisecond
+	t.Cleanup(func() { lockLooks = was })
+	a, _ := secretsApp(t)
+	startVault(t, a)
+	a.handle(SetSecretsLockAfter{After: time.Second})
+	a.handle(SetSecretsLockAfter{After: 0})
+	deadline := time.After(1500 * time.Millisecond)
+	for {
+		select {
+		case f := <-a.events:
+			f()
+			continue
+		case <-deadline:
+		}
+		break
+	}
+	if a.secrets.Locked() {
+		t.Error("with no time to lock after, the secrets locked")
+	}
+}

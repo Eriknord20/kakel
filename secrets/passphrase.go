@@ -88,6 +88,7 @@ func (v *Vault) AddPassphrase(pass string) error {
 		return errors.New("secrets: a passphrase needs something in it")
 	}
 	v.refresh()
+	v.touch()
 	if slices.ContainsFunc(v.file.Slots, func(s slot) bool {
 		return s.Kind == slotKindPassphrase
 	}) {

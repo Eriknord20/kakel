@@ -34,6 +34,7 @@ func (v *Vault) Everything() ([]Export, error) {
 		return nil, ErrLocked
 	}
 	v.refresh()
+	v.touch()
 	out := make([]Export, 0, len(v.items))
 	for _, e := range v.items {
 		out = append(out, Export(e))

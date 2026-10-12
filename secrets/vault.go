@@ -115,6 +115,14 @@ type contents struct {
 	// useful for and catch only a narrow attack.
 	Saves uint64 `json:"saves,omitempty"`
 
+	// LockAfter is how long the vault may go unused before the window
+	// locks it, in whole seconds: 0 for never.
+	//
+	// Inside the sealed half, like Saves, so changing it takes the key.
+	// In a settings file anybody could have turned it off, and the point
+	// of it is a vault that closes itself while the user is away.
+	LockAfter int64 `json:"lockAfter,omitempty"`
+
 	Entries []entry `json:"entries"`
 }
 
@@ -142,6 +150,11 @@ type Vault struct {
 	// saves is the count in the file as it was opened, and what the next
 	// write puts one above.
 	saves uint64
+
+	// lockAfter is the file's LockAfter, and used when something last
+	// reached into the vault: see Unused.
+	lockAfter time.Duration
+	used      time.Time
 
 	// now is the clock, for a test that wants times it chose.
 	now func() time.Time
@@ -243,6 +256,7 @@ func Create(path string, signer ssh.Signer, keyFile string) (*Vault, error) {
 		wipe(data)
 		return give(err)
 	}
+	v.touch()
 	return v, nil
 }
 
@@ -404,6 +418,8 @@ func (v *Vault) readContents(data []byte) error {
 	}
 	v.items = c.Entries
 	v.saves = c.Saves
+	v.lockAfter = time.Duration(c.LockAfter) * time.Second
+	v.touch()
 	return nil
 }
 
@@ -459,6 +475,7 @@ func (v *Vault) refresh() {
 	v.file = f
 	v.items = c.Entries
 	v.saves = c.Saves
+	v.lockAfter = time.Duration(c.LockAfter) * time.Second
 }
 
 // Saves is how many times this vault has been written, as the file this
@@ -470,6 +487,64 @@ func (v *Vault) Saves() uint64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.saves
+}
+
+// touch says the vault has just been used. The caller holds the lock.
+//
+// On the wall clock, with the monotonic reading stripped: on some
+// systems that stops while the computer sleeps, and a laptop closed for
+// an hour has to come back to a vault that locks.
+func (v *Vault) touch() { v.used = v.now().Round(0) }
+
+// Unused is how long it has been since anything reached into the
+// vault: opened it, read a secret out, or changed what is in it.
+// Listing the names does not count, as an open secrets pane does that
+// every second whether anybody is looking or not.
+func (v *Vault) Unused() time.Duration {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.data == nil {
+		return 0
+	}
+	return v.now().Round(0).Sub(v.used)
+}
+
+// LockAfter is how long the vault may go unused before it is locked,
+// or 0 for never. A locked vault does not know: the time is sealed in
+// with the secrets.
+func (v *Vault) LockAfter() time.Duration {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.data == nil {
+		return 0
+	}
+	// Not off the disk: this is asked every few seconds. A change made
+	// in another window comes in with the next look at the file, which
+	// listing the secrets is.
+	return v.lockAfter
+}
+
+// SetLockAfter changes how long the vault may go unused before it is
+// locked, and saves. 0 is never. It is kept to the second.
+func (v *Vault) SetLockAfter(d time.Duration) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.data == nil {
+		return ErrLocked
+	}
+	if d < 0 {
+		return errors.New("secrets: a time to lock after cannot be negative")
+	}
+	// On top of what is on the disk now, not over it.
+	v.refresh()
+	v.touch()
+	was := v.lockAfter
+	v.lockAfter = d.Truncate(time.Second)
+	if err := v.save(); err != nil {
+		v.lockAfter = was
+		return err
+	}
+	return nil
 }
 
 // Lock drops the key and everything it opened. What is on disk stays.
@@ -518,6 +593,7 @@ func (v *Vault) Secret(id string) (string, error) {
 	if v.data == nil {
 		return "", ErrLocked
 	}
+	v.touch()
 	for _, e := range v.items {
 		if e.ID == id {
 			return e.Value, nil
@@ -546,6 +622,7 @@ func (v *Vault) PassphraseFor(keyFile string) (string, error) {
 	// passphrase is not here, and this one asks the user for one they
 	// were never shown.
 	v.refresh()
+	v.touch()
 	for _, e := range v.items {
 		if e.File == keyFile {
 			return e.Value, nil
@@ -567,6 +644,7 @@ func (v *Vault) PasswordFor(login string) (string, error) {
 	}
 	// Another window may have saved it a moment ago.
 	v.refresh()
+	v.touch()
 	for _, e := range v.items {
 		if slices.ContainsFunc(e.Logins, func(l string) bool { return SameLogin(l, login) }) {
 			return e.Value, nil
@@ -598,6 +676,7 @@ func (v *Vault) Put(it Item, value string) (Item, error) {
 	}
 	// On top of what is on the disk now, not over it.
 	v.refresh()
+	v.touch()
 	if strings.TrimSpace(it.Name) == "" {
 		return Item{}, errors.New("secrets: an item needs a name")
 	}
@@ -653,6 +732,7 @@ func (v *Vault) PutDetails(it Item) (Item, error) {
 	}
 	// On top of what is on the disk now, not over it.
 	v.refresh()
+	v.touch()
 	if strings.TrimSpace(it.Name) == "" {
 		return Item{}, errors.New("secrets: an item needs a name")
 	}
@@ -706,6 +786,7 @@ func (v *Vault) Remove(id string) error {
 	}
 	// On top of what is on the disk now, not over it.
 	v.refresh()
+	v.touch()
 	at := slices.IndexFunc(v.items, func(e entry) bool { return e.ID == id })
 	if at < 0 {
 		return ErrNoSuchItem
@@ -731,6 +812,7 @@ func (v *Vault) AddKey(signer ssh.Signer, keyFile string) error {
 	}
 	// On top of what is on the disk now, not over it.
 	v.refresh()
+	v.touch()
 	if err := usable(signer.PublicKey()); err != nil {
 		return err
 	}
@@ -761,6 +843,7 @@ func (v *Vault) RemoveKey(fingerprint string) error {
 	}
 	// On top of what is on the disk now, not over it.
 	v.refresh()
+	v.touch()
 	at := slices.IndexFunc(v.file.Slots, func(s slot) bool { return s.Fingerprint == fingerprint })
 	if at < 0 {
 		return fmt.Errorf("secrets: %s does not open the secrets", fingerprint)
@@ -809,7 +892,7 @@ func (v *Vault) save() error {
 	// Up by one before it is sealed, so the file on disk always says a
 	// higher number than the one it replaced.
 	v.saves++
-	raw, err := json.Marshal(contents{Saves: v.saves, Entries: v.items})
+	raw, err := json.Marshal(contents{Saves: v.saves, LockAfter: int64(v.lockAfter / time.Second), Entries: v.items})
 	if err != nil {
 		return fmt.Errorf("secrets: write %s: %w", v.path, err)
 	}
