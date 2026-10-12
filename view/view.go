@@ -3535,7 +3535,7 @@ func (w *Window) commandTitle(id, title string) string {
 func (w *Window) paletteMachines() []machines.ID {
 	out := w.machines()
 	for _, h := range w.saved {
-		if m := machines.ID(h.ID); !h.Window && !slices.Contains(out, m) {
+		if m := machines.ID(h.ID); !slices.Contains(out, m) {
 			out = append(out, m)
 		}
 	}

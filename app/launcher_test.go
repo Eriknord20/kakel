@@ -1,15 +1,18 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"runtime"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/marrasen/gunim/single"
 	"github.com/marrasen/kakel/machines"
+	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/settings"
 	shellfind "github.com/marrasen/kakel/shells"
 
@@ -356,5 +359,41 @@ func TestTheShellHereIsThePanesOrTheDefault(t *testing.T) {
 	a.argvs["p9"] = cmd.Command("")
 	if got := a.shellHere(); got != "Command Prompt" {
 		t.Fatalf("in front of a Command Prompt, a new terminal runs %q", got)
+	}
+}
+
+// Everything saved is in the launcher: a kakel window kept on the
+// Machines list as a machine, and the copies and tunnels kept, each
+// carried out again by what it is.
+func TestTheLauncherOffersEverythingSaved(t *testing.T) {
+	a, _, _ := twoWindowApp(t)
+	a.st.Saved = []remote.Host{{ID: "w1", Name: "skylake", Address: "skylake", Window: true}}
+	copied := settings.SavedCopy{At: "/src", Into: "/dst", Names: []string{"a.txt"}}
+	tunnelled := settings.SavedTunnel{Host: "web", Kind: "local", Listen: "127.0.0.1:8080", Target: "localhost:80"}
+	a.st.SavedCopies = []settings.SavedCopy{copied}
+	a.st.SavedTunnels = []settings.SavedTunnel{tunnelled}
+	ms := a.launchMachines()
+	i := slices.IndexFunc(ms, func(m LaunchMachine) bool { return m.ID == "w1" })
+	if i < 0 || !ms[i].Window || ms[i].Note != "kakel window" {
+		t.Fatalf("the saved window is offered as %+v", ms)
+	}
+	var copyThing, tunnelThing LaunchThing
+	for _, th := range a.launchThings(ms) {
+		switch th.Kind {
+		case "copy":
+			copyThing = th
+		case "tunnel":
+			tunnelThing = th
+		}
+	}
+	if copyThing.Title != "Copy a.txt" || !strings.HasPrefix(copyThing.Action, "copy:") {
+		t.Fatalf("the saved copy is offered as %+v", copyThing)
+	}
+	if tunnelThing.Note != "via web" || !strings.HasPrefix(tunnelThing.Action, "tunnel:") {
+		t.Fatalf("the saved tunnel is offered as %+v", tunnelThing)
+	}
+	var back settings.SavedCopy
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(copyThing.Action, "copy:")), &back); err != nil || !back.Same(copied) {
+		t.Fatalf("the copy's action reads back as %+v, %v", back, err)
 	}
 }

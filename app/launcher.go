@@ -1,12 +1,15 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"runtime"
 	"slices"
 	"strings"
 
 	"github.com/marrasen/kakel/machines"
+	"github.com/marrasen/kakel/settings"
+	"github.com/marrasen/kakel/tunnel"
 	"github.com/marrasen/kakel/winkeys"
 
 	"github.com/marrasen/gunim"
@@ -50,13 +53,15 @@ type LaunchThing struct {
 }
 
 // LaunchMachine is a machine the launcher offers, what can be opened on
-// it, and which of that Enter opens.
+// it, and which of that Enter opens. Window says it is another kakel's
+// window, saved, rather than a server.
 type LaunchMachine struct {
 	ID      machines.ID
 	Name    string
 	Note    string
 	Actions []LaunchAction
 	Default int
+	Window  bool
 }
 
 // LaunchAction is a thing the launcher can open on a machine.
@@ -271,7 +276,7 @@ func (a *app) publishLauncher() {
 }
 
 // launchMachines are the machines the launcher offers: this computer,
-// then each saved server, the connected ones first.
+// then each saved server and kakel window, the connected ones first.
 func (a *app) launchMachines() []LaunchMachine {
 	actions := func(m machines.ID) []LaunchAction {
 		out := []LaunchAction{{ID: "terminal", Title: "Terminal"}, {ID: "files", Title: "Files"}}
@@ -306,13 +311,13 @@ func (a *app) launchMachines() []LaunchMachine {
 	connected := a.machines.Connected()
 	var rest []LaunchMachine
 	for _, h := range a.st.Saved {
-		if h.Window {
-			continue
-		}
 		m := machines.ID(h.ID)
-		lm := LaunchMachine{ID: m, Name: h.Name}
-		if slices.Contains(connected, m) {
-			lm.Note = "connected"
+		lm := LaunchMachine{ID: m, Name: h.Name, Window: h.Window}
+		if h.Window {
+			lm.Note = "kakel window"
+		}
+		if slices.Contains(connected, m) || a.machines.Get(m).Window != nil {
+			lm.Note = strings.TrimPrefix(lm.Note+" · connected", " · ")
 			out = append(out, withDefault(lm))
 			continue
 		}
@@ -324,7 +329,7 @@ func (a *app) launchMachines() []LaunchMachine {
 // launchThings are what the launcher finds besides the machines: each
 // shell here, files and a terminal on each machine, the files of each
 // WSL distribution, a connection's log, the favourites, the saved
-// commands, and kakel's own windows.
+// commands, copies and tunnels, and kakel's own windows.
 func (a *app) launchThings(ms []LaunchMachine) []LaunchThing {
 	var out []LaunchThing
 	for _, sh := range a.shellsDefaultFirst() {
@@ -375,6 +380,24 @@ func (a *app) launchThings(ms []LaunchMachine) []LaunchThing {
 		}
 		out = append(out, LaunchThing{Title: c.Line, Note: where, Also: []string{"run", "command", "saved"}, Kind: "command",
 			Machine: machines.ID(c.HostID), Action: "saved:" + c.HostID + "\x00" + c.Line})
+	}
+	for _, c := range a.st.SavedCopies {
+		out = append(out, LaunchThing{Title: "Copy " + CopiedWhat(c), Note: CopiedWhere(c, a.machines.Name),
+			Also: []string{"copy", "saved", "job", "transfer", c.At, c.Into}, Kind: "copy", Action: "copy:" + kept(c)})
+	}
+	for _, t := range a.st.SavedTunnels {
+		via := t.Host
+		if t.HostID != "" {
+			if _, ok := a.machines.Saved(machines.ID(t.HostID)); ok {
+				via = a.machines.Name(machines.ID(t.HostID))
+			}
+		}
+		what := t.Kind + " tunnel"
+		if tt, err := tunnel.Read(t); err == nil {
+			what = "Tunnel " + tt.String()
+		}
+		out = append(out, LaunchThing{Title: what, Note: "via " + via, Also: []string{"tunnel", "saved", "port", "forward", t.Listen, t.Target},
+			Kind: "tunnel", Machine: machines.ID(t.HostID), Action: "tunnel:" + kept(t)})
 	}
 	if a.overviewAlone() && len(a.st.Panes) > 0 {
 		out = append(out, LaunchThing{Title: "All Panes", Note: "kakel", Also: []string{"show all panes", "overview", "every pane", "windows", "mission control"},
@@ -450,6 +473,16 @@ func (a *app) launchOn(in Launch) {
 				break
 			}
 		}
+	case strings.HasPrefix(in.Action, "copy:"):
+		var c settings.SavedCopy
+		if json.Unmarshal([]byte(strings.TrimPrefix(in.Action, "copy:")), &c) == nil {
+			a.handle(RunSavedCopy{Saved: c})
+		}
+	case strings.HasPrefix(in.Action, "tunnel:"):
+		var t settings.SavedTunnel
+		if json.Unmarshal([]byte(strings.TrimPrefix(in.Action, "tunnel:")), &t) == nil {
+			a.handle(OpenSavedTunnel{Saved: t})
+		}
 	case in.Action == "app:servers":
 		a.showServers()
 	case in.Action == "app:secrets":
@@ -469,6 +502,13 @@ func (a *app) launchOn(in Launch) {
 	default:
 		a.handle(OpenOn{Machine: in.Machine})
 	}
+}
+
+// kept is a saved copy or tunnel written into a launcher action: by
+// what it is, not where it stood, as the lists move when they are run.
+func kept(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 // closeLauncher closes the launcher's window.

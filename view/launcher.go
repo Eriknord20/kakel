@@ -209,6 +209,8 @@ func (l *Launcher) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 			ic = thingIcons[l.thing(l.found[k]).Kind]
 		case l.st.Machines[l.found[k]].ID == "":
 			ic = icon.Laptop
+		case l.st.Machines[l.found[k]].Window:
+			ic = icon.AppWindow
 		}
 		if ic == nil {
 			ic = icon.SquareTerminal
@@ -305,7 +307,7 @@ func (l *Launcher) paintChips(p *paint.Painter, th *theme.Live, area geom.Rect) 
 var thingIcons = map[string]*icon.Icon{
 	"terminal": icon.SquareTerminal, "files": icon.Folder, "log": icon.ScrollText, "command": icon.SquareChevronRight,
 	"servers": icon.Server, "secrets": icon.Lock, "window": icon.AppWindow, "panes": icon.LayoutGrid,
-	"settings": icon.Settings, "about": icon.Info,
+	"settings": icon.Settings, "about": icon.Info, "copy": icon.Copy, "tunnel": icon.Cable,
 }
 
 // thing is found item i when it is one of the things rather than a
