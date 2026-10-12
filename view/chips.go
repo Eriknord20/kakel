@@ -112,8 +112,12 @@ func (b *chipBar) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children
 	return c.Constrain(geom.Sz(x, h))
 }
 
-// Paint implements [gunim.Node].
-func (b *chipBar) Paint(p *paint.Painter, f gunim.Frame, _ geom.Size, kids gunim.Children) {
+// Paint implements [gunim.Node]: on the title bar's own colour, as the
+// tabs beside it are, not on the window's darker one beneath.
+func (b *chipBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
+	if len(b.boxes) > 0 {
+		p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(widget.MenubarFill.Get(f.Theme)))
+	}
 	i := 0
 	for k := range kids.All {
 		if i >= len(b.boxes) {
