@@ -126,6 +126,28 @@ func TestASecretIsTypedIntoTheTerminalUsedLast(t *testing.T) {
 	if a.st.Focus != "p1" {
 		t.Fatalf("typed, the focus is on %q, want the terminal", a.st.Focus)
 	}
+	// The pane says which terminal Type types into.
+	if id, title := a.typeTarget(); id != "p1" || title != "Terminal 1" {
+		t.Fatalf("Type types into %q, called %q", id, title)
+	}
+}
+
+// Edit sends the window that asked the secret with its value, once,
+// and lets go of the value when the form is open.
+func TestEditingASecretSendsItsValue(t *testing.T) {
+	a, _ := secretsApp(t)
+	startVault(t, a)
+	a.handle(PutSecret{Name: "db", Kind: secrets.Password, Value: "hunter2"})
+	a.handle(EditSecret{ID: a.st.Secrets.Items[0].ID})
+	waitFor(t, a, "the secret sent", func() bool { return len(a.secretEditing) == 1 })
+	e := a.secretEditing[0]
+	if e.Value != "hunter2" || e.Item.Name != "db" {
+		t.Fatalf("sent to change: %+v", e)
+	}
+	a.handle(SecretEditShown{Seq: e.Seq})
+	if len(a.secretEditing) != 0 {
+		t.Fatal("the value was kept after the form opened")
+	}
 }
 
 func TestLockedSecretsShowNoNames(t *testing.T) {

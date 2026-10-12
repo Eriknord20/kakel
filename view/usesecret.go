@@ -103,7 +103,7 @@ func (w *Window) useSecretDialog(u *gunim.UI) {
 	for _, it := range items {
 		byID[widget.Key(it.ID)] = it
 	}
-	table := widget.NewTable(widget.TableColumn{Title: "Name"}, widget.TableColumn{Title: "For", Width: 180})
+	table := widget.NewTable(widget.TableColumn{Title: "Name"}, widget.TableColumn{Title: "User or key", Width: 180})
 	table.Row = func(k widget.Key) widget.TableRow {
 		it := byID[k]
 		return widget.TableRow{Cells: []string{it.Name, useFor(it)}, Strong: related[it.ID]}

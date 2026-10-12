@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marrasen/kakel/app"
+	"github.com/marrasen/kakel/secrets"
 
 	"github.com/marrasen/kakel/machines"
 
@@ -118,13 +119,26 @@ func TestChangeSecretUnlocksFirst(t *testing.T) {
 	if win.afterUnlock != "" {
 		t.Fatal("the command was left waiting")
 	}
-	// The palette asks which; Enter takes the first, and the form opens.
+	// The palette asks which; Enter takes the first, which is asked
+	// for with its value, and the form opens with it in.
+	for len(lastWindow.Client().Intents()) > 0 {
+		<-lastWindow.Client().Intents()
+	}
 	lastWindow.Input(gi.KeyPress{Key: gi.KeyEnter})
 	for range 5 {
 		lastWindow.Frame(time.Second / 60)
 	}
+	if in := nextIntentPast(t); in != (app.EditSecret{ID: "s1"}) {
+		t.Fatalf("picking the secret sent %#v", in)
+	}
+	item := app.SecretItem{ID: "s1", Name: "db", Kind: secrets.Password, Logins: []string{"me@db"}}
+	publish(app.State{Secrets: app.Secrets{Exists: true, Open: true, Items: []app.SecretItem{item},
+		Editing: []app.SecretEdit{{Seq: 1, Item: item, Value: "hunter2"}}}})
 	if win.dialog == nil {
-		t.Fatal("picking the secret opened no form")
+		t.Fatal("the secret sent opened no form")
+	}
+	if in := nextIntentPast(t); in != (app.SecretEditShown{Seq: 1}) {
+		t.Fatalf("the form opening sent %#v", in)
 	}
 }
 

@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
 	"github.com/marrasen/kakel/clip"
 	"github.com/marrasen/kakel/conf"
+	"github.com/marrasen/kakel/machines"
 	"github.com/marrasen/kakel/secrets"
 	"github.com/marrasen/kakel/vaultkeys"
 	"github.com/marrasen/kakel/words"
@@ -39,6 +41,22 @@ type Secrets struct {
 	// Waiting names the terminal used last when an agent has asked for a
 	// secret there, which Type answers, return and all.
 	Waiting string
+	// TypeInto is the terminal Type types into, the one used last, and
+	// TypeIntoTitle what it is called, with the machine it is on: ""
+	// for none.
+	TypeInto, TypeIntoTitle string
+	// Editing is a secret to change, with its value, for the window
+	// that asked to show it in a form once.
+	Editing []SecretEdit
+}
+
+// SecretEdit is a secret to change, with what is saved in it, sent to
+// the window that asked for it.
+type SecretEdit struct {
+	Seq   uint64
+	Item  SecretItem
+	Value string
+	win   int
 }
 
 // SecretItem is one secret, without the secret.
@@ -81,8 +99,14 @@ type (
 	RemoveSecrets struct{ IDs []string }
 	// CopySecret puts a secret on the clipboard, for half a minute.
 	CopySecret struct{ ID string }
-	// TypeSecret types a secret into the terminal used last.
-	TypeSecret struct{ ID string }
+	// TypeSecret types a secret into terminal pane Into, or the
+	// terminal used last when Into is "".
+	TypeSecret struct{ ID, Into string }
+	// EditSecret opens the form changing a secret, with its value in.
+	EditSecret struct{ ID string }
+	// SecretEditShown says the window has the form open, and the value
+	// sent for it can go.
+	SecretEditShown struct{ Seq uint64 }
 	// RevealSecret shows a secret in a dialog.
 	RevealSecret struct{ ID string }
 )
@@ -504,10 +528,13 @@ var (
 )
 
 // typeSecret types a secret into the terminal used last, as if pasted.
-func (a *app) typeSecret(id string) {
+func (a *app) typeSecret(id, into string) {
+	if into == "" {
+		into = a.lastTerminal
+	}
 	a.onSecret(id, "Couldn't type the secret", func(it secrets.Item, value string) {
-		sh := a.shells.Get(a.lastTerminal)
-		if sh == nil || a.kindOfPane(a.lastTerminal) != KindTerminal {
+		sh := a.shells.Get(into)
+		if sh == nil || a.kindOfPane(into) != KindTerminal {
 			a.notify("No terminal to type into", "Click into a terminal first, then type the secret from here.", "")
 			return
 		}
@@ -517,8 +544,49 @@ func (a *app) typeSecret(id string) {
 			value += "\r"
 		}
 		sh.T.Paste(value)
-		a.focusRaised(a.lastTerminal)
+		a.focusRaised(into)
 	})
+}
+
+// editSecret sends the window asking a secret's value, for the form
+// changing it to show what is saved rather than nothing.
+func (a *app) editSecret(id string) {
+	win := a.frontID()
+	a.onSecret(id, "Couldn't open the secret", func(it secrets.Item, value string) {
+		a.secretEdits++
+		// One at a time: an older one not shown yet is not wanted.
+		a.secretEditing = []SecretEdit{{Seq: a.secretEdits, Value: value, win: win,
+			Item: SecretItem{ID: it.ID, Name: it.Name, User: it.User, File: it.File, Kind: it.Kind, Logins: it.Logins}}}
+	})
+}
+
+// secretEditShown lets go of the value sent for a form, once it is open.
+func (a *app) secretEditShown(seq uint64) {
+	a.secretEditing = slices.DeleteFunc(a.secretEditing, func(e SecretEdit) bool { return e.Seq == seq })
+}
+
+// typeTarget is the terminal Type types into, and what it is called,
+// with the machine it is on when that is not this computer.
+func (a *app) typeTarget() (id, title string) {
+	if a.shells.Get(a.lastTerminal) == nil || a.kindOfPane(a.lastTerminal) != KindTerminal {
+		return "", ""
+	}
+	for _, p := range a.st.Panes {
+		if p.ID != a.lastTerminal {
+			continue
+		}
+		title = p.Title
+		on := p.Machine
+		if p.On != "" {
+			on = machines.FarID(p.Machine, p.On)
+		}
+		if on != machines.Local {
+			if name := a.machines.Name(on); !strings.Contains(title, name) {
+				title += " on " + name
+			}
+		}
+	}
+	return a.lastTerminal, title
 }
 
 // revealSecret shows a secret in a dialog, for reading off.

@@ -293,8 +293,10 @@ type Window struct {
 	// shown.
 	toasts *widget.Toasts
 	shown  uint64
-	// viewedSeen is the last file the program sent the window to view.
-	viewedSeen uint64
+	// viewedSeen is the last file the program sent the window to view,
+	// and secretEditSeen the last secret it sent to change.
+	viewedSeen     uint64
+	secretEditSeen uint64
 	// dialog is the dialog open over the window, which keeps the
 	// keyboard until it starts to leave.
 	dialog *widget.Dialog
@@ -665,7 +667,7 @@ func (w *Window) run(id string, u *gunim.UI) bool {
 		if id == "secrets.addNote" {
 			kind = secrets.Note
 		}
-		w.secretForm(kind, nil, u)
+		w.secretForm(kind, nil, "", u)
 		return true
 	case "conn.tunnel", "conn.socks":
 		w.tunnelDialog(id == "conn.socks", u)
@@ -898,7 +900,7 @@ func (w *Window) secretsCommand(id string, u *gunim.UI) {
 		w.chooseFrom("Which secret?", choices, func(i int, u *gunim.UI) {
 			it := items[i]
 			if id == "secrets.change" {
-				w.secretForm(it.Kind, &it, u)
+				u.Send(w, app.EditSecret{ID: it.ID})
 				return
 			}
 			w.confirmRemoveSecret(it, u)
@@ -2209,6 +2211,7 @@ func (w *Window) Update(st app.State, u *gunim.UI) {
 		u.Presence(w.cards.grid) != gunim.Exiting
 	w.showServers(st, u)
 	w.vault = st.Secrets
+	w.showSecretEdits(st.Secrets, u)
 	w.useWhenOpen(u)
 	w.noteFocus(st.Focus)
 	if w.walk != nil {

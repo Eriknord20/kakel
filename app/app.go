@@ -669,6 +669,10 @@ type app struct {
 	secrets      *secrets.Vault
 	secretsAt    string
 	lastTerminal string
+	// secretEdits counts the secrets sent to a form to change, and
+	// secretEditing is the one waiting for its window to show it.
+	secretEdits   uint64
+	secretEditing []SecretEdit
 	// agents is the share of panes with an agent.
 	agents agents
 	// serving serves this window to others.
@@ -1299,6 +1303,8 @@ func (a *app) publish() {
 	st.SavedTunnels = slices.Clone(a.st.SavedTunnels)
 	st.Stage = a.groups[a.groupOf[a.st.Focus]].clone()
 	st.Secrets.Waiting = a.waitingForSecret()
+	st.Secrets.TypeInto, st.Secrets.TypeIntoTitle = a.typeTarget()
+	st.Secrets.Editing = slices.Clone(a.secretEditing)
 	for _, w := range a.wins {
 		if !w.gone {
 			_ = w.c.Publish(WindowTopic, a.stateFor(w, st))
@@ -1465,7 +1471,11 @@ func (a *app) handle(in gunim.Intent) {
 	case CopySecret:
 		a.copySecret(in.ID)
 	case TypeSecret:
-		a.typeSecret(in.ID)
+		a.typeSecret(in.ID, in.Into)
+	case EditSecret:
+		a.editSecret(in.ID)
+	case SecretEditShown:
+		a.secretEditShown(in.Seq)
 	case RevealSecret:
 		a.revealSecret(in.ID)
 	case AddSecretsKey:

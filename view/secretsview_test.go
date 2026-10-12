@@ -143,7 +143,7 @@ func TestANewKeyWhereOneIsStaysOpenSayingSo(t *testing.T) {
 func TestANoteTakesSeveralLines(t *testing.T) {
 	win, _, publish := windowStage(t)
 	publish(app.State{})
-	win.secretForm(secrets.Note, nil, lastUI)
+	win.secretForm(secrets.Note, nil, "", lastUI)
 	for range 10 {
 		lastWindow.Frame(time.Second / 60)
 	}

@@ -62,7 +62,7 @@ func newSecretsPane(w *Window) *secretsPane {
 	p.head.label.Size, p.head.label.Color = widget.DialogTitleSize, widget.Ink
 	p.table = widget.NewTable(
 		widget.TableColumn{Title: "Name"},
-		widget.TableColumn{Title: "For", Width: 200},
+		widget.TableColumn{Title: "User or key", Width: 200},
 		widget.TableColumn{Title: "Kind", Width: 110},
 	)
 	p.table.Row = func(k widget.Key) widget.TableRow {
@@ -89,10 +89,10 @@ func newSecretsPane(w *Window) *secretsPane {
 	p.add, p.note = button(icon.Plus, "Add Secret"), button(icon.StickyNote, "Add Note")
 	p.lock, p.unlock = button(icon.Lock, "Lock"), button(icon.LockOpen, "Unlock")
 	p.typ, p.cp, p.reveal = button(icon.Keyboard, "Type"), button(icon.Copy, "Copy"), button(icon.Eye, "Show")
-	p.change, p.remove = button(icon.Pencil, "Change"), button(icon.Trash2, "Remove")
+	p.change, p.remove = button(icon.Pencil, "Edit"), button(icon.Trash2, "Remove")
 	p.lock.OnClick, p.unlock.OnClick = widget.Sends(app.LockSecrets{}), widget.Sends(app.UnlockSecrets{})
-	p.add.OnClick = func(u *gunim.UI) gunim.Intent { p.w.secretForm(secrets.Password, nil, u); return nil }
-	p.note.OnClick = func(u *gunim.UI) gunim.Intent { p.w.secretForm(secrets.Note, nil, u); return nil }
+	p.add.OnClick = func(u *gunim.UI) gunim.Intent { p.w.secretForm(secrets.Password, nil, "", u); return nil }
+	p.note.OnClick = func(u *gunim.UI) gunim.Intent { p.w.secretForm(secrets.Note, nil, "", u); return nil }
 	onRow := func(b *widget.Button, do func(app.SecretItem, *gunim.UI)) {
 		b.OnClick = func(u *gunim.UI) gunim.Intent {
 			if k, ok := p.table.Cursor(); ok {
@@ -101,10 +101,16 @@ func newSecretsPane(w *Window) *secretsPane {
 			return nil
 		}
 	}
-	onRow(p.typ, func(it app.SecretItem, u *gunim.UI) { u.Send(p.table, app.TypeSecret{ID: it.ID}) })
+	// Into the terminal the button names, and no other: one that took
+	// the keyboard since is not the one the user read.
+	onRow(p.typ, func(it app.SecretItem, u *gunim.UI) {
+		if p.st.TypeInto != "" {
+			u.Send(p.table, app.TypeSecret{ID: it.ID, Into: p.st.TypeInto})
+		}
+	})
 	onRow(p.cp, func(it app.SecretItem, u *gunim.UI) { u.Send(p.table, app.CopySecret{ID: it.ID}) })
 	onRow(p.reveal, func(it app.SecretItem, u *gunim.UI) { u.Send(p.table, app.RevealSecret{ID: it.ID}) })
-	onRow(p.change, func(it app.SecretItem, u *gunim.UI) { p.w.secretForm(it.Kind, &it, u) })
+	onRow(p.change, func(it app.SecretItem, u *gunim.UI) { u.Send(p.table, app.EditSecret{ID: it.ID}) })
 	p.remove.OnClick = func(u *gunim.UI) gunim.Intent {
 		// The ones marked with Space, or the one under the cursor.
 		var picked []app.SecretItem
@@ -160,6 +166,10 @@ func (p *secretsPane) show(st app.Secrets, u *gunim.UI) {
 		slots = append(slots, widget.Key(k.Fingerprint))
 	}
 	p.keys.SetKeys(slots, u)
+	p.typ.Label, p.typ.Disabled, p.typ.Tooltip = "Type", true, "Click into a terminal first: Type types into it"
+	if st.TypeInto != "" {
+		p.typ.Label, p.typ.Disabled, p.typ.Tooltip = "Type into "+shortened(st.TypeIntoTitle, typeIntoLongest), false, ""
+	}
 	if st.Open {
 		p.opens.set("What opens them", u, p.addKey, p.addPass, p.removeKey)
 	} else {
@@ -202,10 +212,40 @@ func (p *secretsPane) Paint(pt *paint.Painter, f gunim.Frame, box geom.Size, kid
 	kids.At(0).Paint(pt)
 }
 
-// secretForm asks for a new secret of kind, or a change to old. A
-// password is typed hidden, with a box to show it and a button that
-// makes one up; a note is typed in the open.
-func (w *Window) secretForm(kind secrets.Kind, old *app.SecretItem, u *gunim.UI) {
+// typeIntoLongest is how much of the terminal's title the Type button
+// shows.
+const typeIntoLongest = 32
+
+// shortened is s cut to n letters, ending in … where it was cut.
+func shortened(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
+
+// showSecretEdits opens the form changing each secret the program sent
+// the window, with its value, that it has not shown; and says it has,
+// for the value to go.
+func (w *Window) showSecretEdits(st app.Secrets, u *gunim.UI) {
+	for _, e := range st.Editing {
+		if e.Seq <= w.secretEditSeen {
+			continue
+		}
+		w.secretEditSeen = e.Seq
+		it := e.Item
+		w.secretForm(it.Kind, &it, e.Value, u)
+		u.Send(w, app.SecretEditShown{Seq: e.Seq})
+	}
+}
+
+// secretForm asks for a new secret of kind, or a change to old, whose
+// value is was. A password is typed hidden, with a box to show it and a
+// button that makes one up; a note is typed in the open. Name is what
+// the user calls it, and User name the account it signs in as, as a
+// password manager keeps it; where it signs in by itself is shown, not
+// typed.
+func (w *Window) secretForm(kind secrets.Kind, old *app.SecretItem, was string, u *gunim.UI) {
 	name, user, value := widget.NewTextField(), widget.NewTextField(), widget.NewTextField()
 	user.Placeholder = "Optional"
 	value.Secret = true
@@ -218,24 +258,29 @@ func (w *Window) secretForm(kind secrets.Kind, old *app.SecretItem, u *gunim.UI)
 		field, text = note, note.Text
 		label, title, missing = "Note", "Add Note", "Enter a note"
 		if old != nil {
-			note.Placeholder = "Unchanged"
+			note.SetText(was, nil)
 		}
 	}
 	id := ""
 	if old != nil {
-		id, title = old.ID, "Change "+old.Name
+		id, title = old.ID, "Edit "+old.Name
 		name.SetText(old.Name, nil)
 		user.SetText(old.User, nil)
-		value.Placeholder = "Unchanged"
+		value.SetText(was, nil)
 	} else if m := w.machineOf(w.lastTerm); m != "" {
-		// The server in front of the user, which a password typed now
-		// is nearly always for.
-		user.SetText(w.nameOf(m), nil)
+		// Named after the server in front of the user, which a password
+		// typed now is nearly always for.
+		name.SetText(w.nameOf(m), nil)
 	}
-	// Who or what it is for, completed from the servers' names.
+	// Named after a server, completed from the servers' names.
 	servers := w.serverNames()
-	user.OnChange = func(text string, u *gunim.UI) gunim.Intent { user.Ghost = restOf(false, servers, text); return nil }
-	form := widget.NewForm().Add("Name", name).Add("For", user).Add(label, field)
+	name.OnChange = func(text string, u *gunim.UI) gunim.Intent { name.Ghost = restOf(false, servers, text); return nil }
+	form := widget.NewForm().Add("Name", name).Add("User name", user).Add(label, field)
+	if old != nil && len(old.Logins) > 0 {
+		signs := widget.NewLabel(strings.Join(old.Logins, ", ") + ", by itself")
+		signs.Color = widget.Placeholder
+		form.Add("Signs in to", signs)
+	}
 	d := widget.NewDialog(title)
 	if kind != secrets.Note {
 		reveal := widget.NewCheckbox("Show password")
@@ -256,13 +301,18 @@ func (w *Window) secretForm(kind secrets.Kind, old *app.SecretItem, u *gunim.UI)
 		switch {
 		case strings.TrimSpace(name.Text()) == "":
 			return "Enter a name"
-		case old == nil && text() == "":
+		case text() == "":
 			return missing
 		}
 		return ""
 	}
 	d.OnAccept = func(u *gunim.UI) gunim.Intent {
-		return app.PutSecret{ID: id, Name: strings.TrimSpace(name.Text()), User: strings.TrimSpace(user.Text()), Kind: kind, Value: text()}
+		v := text()
+		if old != nil && v == was {
+			// Unchanged: kept as it is, not written again.
+			v = ""
+		}
+		return app.PutSecret{ID: id, Name: strings.TrimSpace(name.Text()), User: strings.TrimSpace(user.Text()), Kind: kind, Value: v}
 	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
