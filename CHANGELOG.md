@@ -7,6 +7,55 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.0-beta.23
+
+### Changed
+
+**Job cards in the Jobs pane are redesigned.** Each card shows:
+- A badge with the kind of job (copy, move or delete), coloured by how
+  it is going: the accent while it runs, green when done, red when it
+  failed, grey when stopped.
+- A heading that says what it does to what, such as "Copying 6 items"
+  or "Couldn't copy gone.txt", with one line on progress or how it
+  ended.
+- Where it copies from and to: two boxes, each with the machine, the
+  folder's name and its full path. A delete shows the one folder.
+- The files it works on, each marked waiting, in progress or done, up
+  to 12.
+- The progress bar and speed graph only while the job runs.
+- Save as a bookmark button, Repeat, and an ✕ that takes a finished
+  job off the list.
+
+**Click a folder on a job card to open it in Files**, on its machine,
+in a new tab. Tab and Enter work too.
+
+**Text that does not fit fades out** instead of ending in "…", which
+often cut off too much. This covers tab titles, the file list and
+other tables. Hover to see the whole text.
+
+**A server's tab keeps its folder name.** A Files tab on a server is
+titled "Skylake: build". When that does not fit, the tab shows "build"
+alone before fading.
+
+**The file list's Size and Modified columns fit their text,** so Name
+gets the room they leave. They widen if a wider value scrolls into
+view and never narrow while the folder is open. Type keeps its width,
+and you can still drag it.
+
+**Secrets can lock themselves after a time unused.** The "Auto-lock:
+…" button beside Lock (also Auto-Lock Secrets in the Secrets menu and
+the palette) offers Never, 1, 5, 15 or 30 minutes, or 1, 4 or 8 hours.
+Never is the default. The time counts from the last time a secret was
+read or changed. It is kept inside the sealed secrets, so only someone
+who can open them can change it.
+
+### Fixed
+
+- A Files tab on a server showed only "Skylake: " when tabs were
+  narrow: the folder name was cut off.
+- A job card opened after the job had ended showed an empty progress
+  bar.
+
 ## v0.12.0-beta.22
 
 ### Changed
