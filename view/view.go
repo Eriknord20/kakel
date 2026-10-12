@@ -2539,14 +2539,29 @@ func (w *Window) titleOf(p app.Pane) string { return titleIn(w.machineList, p) }
 
 // titleIn is what the window's title and a tab call pane p, with the
 // machines' names in list: its title, and for files on another machine,
-// which machine first, as their folder alone does not say. The Machines
-// pane lists them under their machine already, and takes the title
-// alone.
+// which machine first, as their folder alone does not say; and for a
+// terminal through another kakel window, which machine after, as the
+// window's own title for it, "PowerShell 7", does not say either. The
+// Machines pane lists them under their machine already, and takes the
+// title alone.
 func titleIn(list []machines.Info, p app.Pane) string {
-	if p.Kind != app.KindFileManager || p.Machine == "" {
+	switch {
+	case p.Machine == "":
+		return p.Title
+	case p.Kind == app.KindFileManager:
+		return captionIn(list, p) + ": " + p.Title
+	case p.Kind != app.KindTerminal || !slices.ContainsFunc(list, func(m machines.Info) bool { return m.ID == p.Machine && m.Window }):
 		return p.Title
 	}
-	return captionIn(list, p) + ": " + p.Title
+	on := nameIn(list, p.Machine)
+	if p.On != "" {
+		on = farNameIn(list, machines.FarID(p.Machine, p.On))
+	}
+	if strings.Contains(p.Title, on) {
+		// Called after it already, until the window names it.
+		return p.Title
+	}
+	return p.Title + " on " + on
 }
 
 // captionIn is captionOf, naming machines from list.
