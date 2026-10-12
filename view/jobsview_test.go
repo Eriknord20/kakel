@@ -29,3 +29,24 @@ func TestAJobSaysWhenItRan(t *testing.T) {
 		}
 	}
 }
+
+// A job says where it works: from where to where for a copy or a move,
+// and where for a delete. A single name is listed too.
+func TestAJobSaysWhereItWorks(t *testing.T) {
+	for _, c := range []struct {
+		j    app.Job
+		want string
+	}{
+		{app.Job{}, ""},
+		{app.Job{From: `C:\Users\me on this computer`, To: "/srv/www on web"},
+			"From C:\\Users\\me on this computer\nTo /srv/www on web"},
+		{app.Job{From: "/tmp on web"}, "In /tmp on web"},
+	} {
+		if got := whereLines(c.j); got != c.want {
+			t.Errorf("a job from %q to %q says %q, want %q", c.j.From, c.j.To, got, c.want)
+		}
+	}
+	if got := namesLines(app.Job{Names: []string{"report.pdf"}}); got != "   report.pdf" {
+		t.Errorf("a job of one name lists %q, want it named", got)
+	}
+}

@@ -100,12 +100,14 @@ func (p *jobsPane) Paint(pt *paint.Painter, f gunim.Frame, box geom.Size, kids g
 	kids.At(3).Paint(pt)
 }
 
-// jobCard is one job: its title and what can be done with it, its
-// progress, a graph of its speed, the names it works on with the ones
-// done ticked, and what it is doing or how it ended. Cancel shows while
-// it runs; a finished copy offers Repeat and Save this copy.
+// jobCard is one job: its title and what can be done with it, where
+// it works from and to, its progress, a graph of its speed, the names
+// it works on with the ones done ticked, and what it is doing or how it
+// ended. Cancel shows while it runs; a finished copy offers Repeat
+// and Save this copy.
 type jobCard struct {
 	title  *widget.Label
+	where  *widget.Label
 	detail *widget.Label
 	names  *widget.Label
 	bar    *widget.ProgressBar
@@ -121,19 +123,19 @@ type jobCard struct {
 
 func newJobCard(j app.Job) *jobCard {
 	c := &jobCard{
-		title: widget.NewLabel(""), detail: widget.NewLabel(""), names: widget.NewLabel(""),
+		title: widget.NewLabel(""), where: widget.NewLabel(""), detail: widget.NewLabel(""), names: widget.NewLabel(""),
 		bar: widget.NewProgressBar(), graph: widget.NewLiveGraph(app.SampleEvery, app.MostSpeeds),
 		cancel: iconButton(icon.CircleStop, "Cancel"), repeat: iconButton(icon.Repeat, "Repeat"), save: widget.NewCheckbox("Save this copy"),
 	}
 	c.graph.Label = func(v float64) string { return words.Size(int64(v)) + "/s" }
 	c.title.MaxLines, c.detail.MaxLines = 1, 1
 	c.detail.Size, c.detail.Color = smallText, look.Faint
-	c.names.Size = smallText
+	c.names.Size, c.where.Size = smallText, smallText
 	c.cancel.OnClick, c.repeat.OnClick = widget.Sends(app.CancelJob{ID: j.ID}), widget.Sends(app.RepeatJob{ID: j.ID})
 	id := j.ID
 	c.save.OnChange = func(on bool, u *gunim.UI) gunim.Intent { return app.SaveCopy{ID: id, On: on} }
 	c.acts = c.want(j)
-	c.fill(j)
+	c.fill(j, nil)
 	return c
 }
 
@@ -148,9 +150,15 @@ func (c *jobCard) want(j app.Job) []gunim.Node {
 	return nil
 }
 
-// fill says j on the card.
-func (c *jobCard) fill(j app.Job) {
+// fill says j on the card. The bar moves to its share, or jumps there
+// with u nil, for a card new to the pane.
+func (c *jobCard) fill(j app.Job, u *gunim.UI) {
+	c.bar.Indeterminate = j.Share < 0 && !j.Done
+	if j.Share >= 0 {
+		c.bar.SetValue(j.Share, u)
+	}
 	c.title.Text = j.Title
+	c.where.Text = whereLines(j)
 	c.detail.Text = j.Detail
 	if when := jobWhen(j, time.Now()); when != "" {
 		c.detail.Text = strings.TrimPrefix(c.detail.Text+" · "+when, " · ")
@@ -209,13 +217,22 @@ func took(d time.Duration) string {
 	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
 }
 
-// namesLines lists what a job works on, the one it is on marked and
-// the ones done ticked, and at most five of them.
-func namesLines(j app.Job) string {
-	if len(j.Names) < 2 && j.Current == "" {
+// whereLines says where a job works: the folder it reads from and the
+// one it writes to, or the one it deletes in.
+func whereLines(j app.Job) string {
+	switch {
+	case j.From == "":
 		return ""
+	case j.To == "":
+		return "In " + j.From
 	}
-	const most = 5
+	return "From " + j.From + "\nTo " + j.To
+}
+
+// namesLines lists what a job works on, the one it is on marked and
+// the ones done ticked, and at most ten of them.
+func namesLines(j app.Job) string {
+	const most = 10
 	var out []string
 	for i, n := range j.Names {
 		if i == most-1 && len(j.Names) > most {
@@ -236,11 +253,7 @@ func namesLines(j app.Job) string {
 
 // show brings the card up to date with j.
 func (c *jobCard) show(j app.Job, u *gunim.UI) {
-	c.bar.Indeterminate = j.Share < 0 && !j.Done
-	if j.Share >= 0 {
-		c.bar.SetValue(j.Share, u)
-	}
-	c.fill(j)
+	c.fill(j, u)
 	want := c.want(j)
 	for _, n := range c.acts {
 		if !slices.Contains(want, n) {
@@ -257,7 +270,7 @@ func (c *jobCard) show(j app.Job, u *gunim.UI) {
 
 // Children implements [gunim.Composite].
 func (c *jobCard) Children() []gunim.Node {
-	return append([]gunim.Node{c.title, c.detail, c.bar, c.graph, c.names}, c.acts...)
+	return append([]gunim.Node{c.title, c.detail, c.bar, c.graph, c.names, c.where}, c.acts...)
 }
 
 // Layout implements [gunim.Node].
@@ -267,7 +280,7 @@ func (c *jobCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	right := w - pad
 	line := float32(0)
 	byNode := map[gunim.Node]gunim.Child{}
-	for i := 5; i < kids.Len(); i++ {
+	for i := 6; i < kids.Len(); i++ {
 		byNode[kids.At(i).Node()] = kids.At(i)
 	}
 	sizes := map[gunim.Node]geom.Size{}
@@ -287,11 +300,15 @@ func (c *jobCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 		k.Place(geom.Pt(right, pad+(line-sizes[n].H)/2))
 		right -= gap
 	}
-	title, detail, bar, graph, names := kids.At(0), kids.At(1), kids.At(2), kids.At(3), kids.At(4)
+	title, detail, bar, graph, names, where := kids.At(0), kids.At(1), kids.At(2), kids.At(3), kids.At(4), kids.At(5)
 	ts := title.Layout(gunim.Constraints{Max: geom.Sz(max(0, right-pad), 40)})
 	line = max(line, ts.H)
 	title.Place(geom.Pt(pad, pad+(line-ts.H)/2))
 	y := pad + line + gap
+	if ws := where.Layout(gunim.Constraints{Max: geom.Sz(max(0, w-2*pad), 400)}); c.where.Text != "" && ws.H > 0 {
+		where.Place(geom.Pt(pad, y-gap/2))
+		y += ws.H + gap/2
+	}
 	bs := bar.Layout(gunim.Constraints{Max: geom.Sz(max(0, w-2*pad), 20)})
 	bar.Place(geom.Pt(pad, y))
 	y += bs.H + gap/2

@@ -41,6 +41,10 @@ type Job struct {
 	// and Kind is copy, move or delete.
 	Machine machines.ID
 	Kind    string
+	// From is where the names are, and To where they go, each a folder
+	// and the machine it is on: "C:\Users\me on this computer". A delete
+	// has no To.
+	From, To string
 	// Detail says how far it has got, or how it ended.
 	Detail string
 	// Share is how much is done, from 0 to 1, and below zero while the
@@ -171,6 +175,10 @@ func (a *app) showJobs() bool {
 		}
 		row := jobRow(r, p)
 		row.Saved = a.isSaved(r)
+		row.From = a.jobPlace(r.op.At, r.from)
+		if r.op.Kind != jobs.Delete {
+			row.To = a.jobPlace(r.op.Into, r.to)
+		}
 		rows = append(rows, row)
 		if !p.Done {
 			live = true
@@ -205,6 +213,15 @@ func (a *app) showJobs() bool {
 	return live
 }
 
+// jobPlace says a folder a job works in, and the machine it is on.
+func (a *app) jobPlace(dir string, on machines.ID) string {
+	name := "this computer"
+	if a.machines != nil {
+		name = a.machines.Name(on)
+	}
+	return typedOn(dir) + " on " + name
+}
+
 // jobRow is a job as the pane shows it.
 func jobRow(r *running, p jobs.Progress) Job {
 	row := Job{ID: r.id, Title: r.title, Share: -1, Done: p.Done, Names: r.op.Names, Current: p.Current, Started: r.started, Finished: r.finished,
@@ -236,6 +253,7 @@ func jobRow(r *running, p jobs.Progress) Job {
 		}
 	case p.Done:
 		row.Share = 1
+		row.Title = pastTense(r.title)
 		done := words.Count(p.FilesDone, "file") + " done"
 		if p.Skipped > 0 {
 			done += fmt.Sprintf(", %d left as they were", p.Skipped)
