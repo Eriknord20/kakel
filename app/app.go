@@ -30,6 +30,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/marrasen/gunim/single"
 	"github.com/marrasen/kakel/glyph"
 	"github.com/marrasen/kakel/jobs"
 	"github.com/marrasen/kakel/keys"
@@ -38,7 +39,6 @@ import (
 	"github.com/marrasen/kakel/settings"
 	shellfind "github.com/marrasen/kakel/shells"
 	"github.com/marrasen/kakel/shellsetup"
-	"github.com/marrasen/kakel/single"
 	"github.com/marrasen/kakel/vfs"
 	"github.com/marrasen/kakel/vt"
 

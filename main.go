@@ -36,9 +36,9 @@ import (
 	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
 
+	"github.com/marrasen/gunim/single"
 	"github.com/marrasen/kakel/appicon"
 	"github.com/marrasen/kakel/settings"
-	"github.com/marrasen/kakel/single"
 )
 
 func main() {

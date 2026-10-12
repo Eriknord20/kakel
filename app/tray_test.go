@@ -9,7 +9,7 @@ import (
 	"github.com/marrasen/gunim/driver"
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/gunimtest"
-	"github.com/marrasen/kakel/single"
+	"github.com/marrasen/gunim/single"
 )
 
 // fakeTray records what the program shows in the tray.

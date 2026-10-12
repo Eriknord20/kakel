@@ -13,10 +13,10 @@ import (
 
 	"github.com/marrasen/gunim/install"
 
+	"github.com/marrasen/gunim/single"
 	"github.com/marrasen/kakel/appicon"
 	"github.com/marrasen/kakel/conf"
 	"github.com/marrasen/kakel/settings"
-	"github.com/marrasen/kakel/single"
 )
 
 // Installing kakel is gunim's install package: a kakel started from

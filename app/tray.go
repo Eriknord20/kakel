@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marrasen/gunim/single"
 	"github.com/marrasen/kakel/appicon"
 	"github.com/marrasen/kakel/machines"
 	"github.com/marrasen/kakel/settings"
-	"github.com/marrasen/kakel/single"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/driver"

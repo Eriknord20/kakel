@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marrasen/gunim/single"
 	"github.com/marrasen/kakel/machines"
 	"github.com/marrasen/kakel/settings"
 	shellfind "github.com/marrasen/kakel/shells"
-	"github.com/marrasen/kakel/single"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/driver"
