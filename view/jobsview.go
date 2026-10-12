@@ -12,6 +12,8 @@ import (
 	"github.com/marrasen/kakel/look"
 
 	"github.com/marrasen/gunim"
+	"github.com/marrasen/gunim/access"
+	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/icon"
 	gi "github.com/marrasen/gunim/input"
@@ -533,16 +535,32 @@ func (r *jobRoute) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids guni
 }
 
 // jobEndBox is a folder a job works in: the machine it is on, its name
-// and its whole path.
+// and its whole path. A click, or Enter, opens the folder in a file
+// manager tab; under the pointer the box lights and shows an open
+// folder at its corner.
 type jobEndBox struct {
+	anim.Group
 	machine    *widget.Icon
 	on         *widget.Label
 	name, path *widget.Label
+	opens      *widget.Icon
+	// open is what a click sends, and nil for a box with no folder.
+	open gunim.Intent
+	// hover and ring run from 0 to 1 as the pointer comes over the box
+	// and as it takes the keyboard.
+	hover, ring *anim.Float
+	click       widget.Clicker
+	tip         widget.PartTip
+	size        geom.Size
 }
 
 func newJobEndBox() *jobEndBox {
-	b := &jobEndBox{machine: widget.NewIcon(icon.Monitor, ""), on: widget.NewLabel(""), name: widget.NewLabel(""), path: widget.NewLabel("")}
+	b := &jobEndBox{machine: widget.NewIcon(icon.Monitor, ""), on: widget.NewLabel(""), name: widget.NewLabel(""), path: widget.NewLabel(""),
+		opens: widget.NewIcon(icon.FolderOpen, ""), hover: anim.NewFloat(0), ring: anim.NewFloat(0)}
+	b.Add(b.hover)
+	b.Add(b.ring)
 	b.machine.Color, b.machine.Size = look.Faint, endIconSize
+	b.opens.Color, b.opens.Size = look.Faint, endIconSize
 	b.on.Size, b.on.Color, b.on.MaxLines = smallText, look.Faint, 1
 	b.name.MaxLines = 1
 	b.path.Size, b.path.Color, b.path.MaxLines = smallText, look.Faint, 2
@@ -559,10 +577,97 @@ func (b *jobEndBox) show(e app.JobEnd) {
 		b.machine.Icon = icon.Monitor
 	}
 	b.on.Text, b.name.Text, b.path.Text = e.Machine, e.Folder, e.Path
+	b.open = nil
+	if e.Dir != "" {
+		b.open = app.OpenFilesOn{Machine: e.On, Path: e.Dir, NewTab: true}
+	}
 }
 
 // Children implements [gunim.Composite].
-func (b *jobEndBox) Children() []gunim.Node { return []gunim.Node{b.machine, b.on, b.name, b.path} }
+func (b *jobEndBox) Children() []gunim.Node {
+	return []gunim.Node{b.machine, b.on, b.name, b.path, b.opens}
+}
+
+// Handle implements [gunim.Handler].
+func (b *jobEndBox) Handle(e gi.Event, u *gunim.UI) bool {
+	if b.open == nil {
+		return false
+	}
+	b.tip.Handle(e, u, b, "Open "+b.name.Text+" in Files")
+	switch e := e.(type) {
+	case gi.PointerEnter:
+		b.hover.Animate(1, widget.Quick.Get(u.Theme()))
+	case gi.PointerLeave:
+		b.hover.Animate(0, widget.Settle.Get(u.Theme()))
+	case gi.PointerDown:
+		if e.Button != gi.ButtonPrimary {
+			return false
+		}
+		b.click.Press(e, 0)
+		return true
+	case gi.PointerUp:
+		inside := -1
+		if (geom.Rect{Max: b.size.Point()}).Contains(e.Pos) {
+			inside = 0
+		}
+		if b.click.Release(e, inside) {
+			b.fire(u)
+		}
+		return true
+	case gi.KeyPress:
+		if e.Mods != 0 || e.Key != gi.KeyEnter && e.Key != gi.KeyKPEnter && e.Key != gi.KeySpace {
+			return false
+		}
+		b.fire(u)
+		return true
+	case gi.FocusRing:
+		to := float32(0)
+		if e.On {
+			to = 1
+		}
+		b.ring.Animate(to, widget.RingFade.Get(u.Theme()))
+	case gi.FocusLost:
+		b.ring.Animate(0, widget.RingFade.Get(u.Theme()))
+	}
+	return false
+}
+
+// fire opens the folder.
+func (b *jobEndBox) fire(u *gunim.UI) {
+	b.tip.Hide(u)
+	u.Cue(gunim.CuePress, b)
+	u.Send(b, b.open)
+}
+
+// Focusable implements [gunim.Focusable]: Tab comes to a box with a
+// folder to open.
+func (b *jobEndBox) Focusable() bool { return b.open != nil }
+
+// FocusOnPress implements [gunim.PressFocuser]: a click opens the
+// folder and leaves the keyboard where it was.
+func (b *jobEndBox) FocusOnPress() bool { return false }
+
+// Cursor implements [gunim.CursorShaper].
+func (b *jobEndBox) Cursor(geom.Point) gi.Cursor {
+	if b.open == nil {
+		return gi.CursorArrow
+	}
+	return gi.CursorHand
+}
+
+// Access implements [gunim.Accessible].
+func (b *jobEndBox) Access() access.Info {
+	return access.Info{Role: access.RoleButton, Name: "Open " + b.name.Text + " on " + b.on.Text, Actions: []string{access.ActionPress}}
+}
+
+// AccessAct implements [gunim.AccessActor].
+func (b *jobEndBox) AccessAct(r access.Request, u *gunim.UI) bool {
+	if r.Action != access.ActionPress || b.open == nil {
+		return false
+	}
+	b.fire(u)
+	return true
+}
 
 // Layout implements [gunim.Node]: the machine along the top, the
 // folder's name under it, and its path under that unless the name says
@@ -571,9 +676,11 @@ func (b *jobEndBox) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Child
 	const padX, padY = 12, 10
 	w := cs.Max.W
 	inner := max(0, w-2*padX)
-	machine, on, name, path := kids.At(0), kids.At(1), kids.At(2), kids.At(3)
+	machine, on, name, path, opens := kids.At(0), kids.At(1), kids.At(2), kids.At(3), kids.At(4)
 	ms := machine.Layout(gunim.Constraints{})
-	os := on.Layout(gunim.Constraints{Max: geom.Sz(max(0, inner-ms.W-6), 0)})
+	ops := opens.Layout(gunim.Constraints{})
+	opens.Place(geom.Pt(w-padX-ops.W, padY))
+	os := on.Layout(gunim.Constraints{Max: geom.Sz(max(0, inner-ms.W-6-ops.W-6), 0)})
 	line := max(ms.H, os.H)
 	machine.Place(geom.Pt(padX, padY+(line-ms.H)/2))
 	on.Place(geom.Pt(padX+ms.W+6, padY+(line-os.H)/2))
@@ -586,14 +693,22 @@ func (b *jobEndBox) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Child
 		path.Place(geom.Pt(padX, y+2))
 		y += 2 + ps.H
 	}
-	return geom.Sz(w, max(y+padY, cs.Min.H))
+	b.size = geom.Sz(w, max(y+padY, cs.Min.H))
+	return b.size
 }
 
 // Paint implements [gunim.Node].
 func (b *jobEndBox) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
-	p.RRect(geom.Rect{Max: box.Point()}, 8, paint.Solid(faintFill(f)))
+	b.size = box
+	fill := faintFill(f)
+	lit := min(max(b.hover.Value(), 0), 1)
+	fill.A += uint8(float32(0x12) * lit)
+	r := geom.Rect{Max: box.Point()}
+	p.RRect(r, 8, paint.Solid(fill))
+	widget.FocusRing(p, r, 8, b.ring.Value(), f.Theme)
 	for i := 0; i < kids.Len(); i++ {
-		if i == 3 && b.path.Text == b.name.Text {
+		switch {
+		case i == 3 && b.path.Text == b.name.Text, i == 4 && lit < 0.5:
 			continue
 		}
 		kids.At(i).Paint(p)

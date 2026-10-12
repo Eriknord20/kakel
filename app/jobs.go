@@ -77,6 +77,10 @@ type JobEnd struct {
 	// machine is this computer.
 	Folder, Path, Machine string
 	Local                 bool
+	// On is the machine, and Dir the folder as its files name it, to
+	// open it there.
+	On  machines.ID
+	Dir string
 }
 
 // KindJobs is the jobs pane.
@@ -223,7 +227,7 @@ func (a *app) showJobs() bool {
 
 // jobEnd is the folder dir on the machine on, for the jobs pane.
 func (a *app) jobEnd(dir string, on machines.ID) JobEnd {
-	end := JobEnd{Path: typedOn(dir), Machine: "this computer", Local: on == machines.Local}
+	end := JobEnd{Path: typedOn(dir), Machine: "this computer", Local: on == machines.Local, On: on, Dir: dir}
 	if a.machines != nil {
 		end.Machine = a.machines.Name(on)
 	}
