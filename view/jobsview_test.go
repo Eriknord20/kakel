@@ -30,23 +30,21 @@ func TestAJobSaysWhenItRan(t *testing.T) {
 	}
 }
 
-// A job says where it works: from where to where for a copy or a move,
-// and where for a delete. A single name is listed too.
-func TestAJobSaysWhereItWorks(t *testing.T) {
+// A card's heading says what the job does, or did, to what, and how
+// it ended where that was not by finishing.
+func TestAJobCardSaysWhatItDoes(t *testing.T) {
+	two := []string{"a.txt", "b.txt"}
 	for _, c := range []struct {
 		j    app.Job
 		want string
 	}{
-		{app.Job{}, ""},
-		{app.Job{From: `C:\Users\me on this computer`, To: "/srv/www on web"},
-			"From C:\\Users\\me on this computer\nTo /srv/www on web"},
-		{app.Job{From: "/tmp on web"}, "In /tmp on web"},
+		{app.Job{Kind: "copy", Names: two}, "Copying 2 items"},
+		{app.Job{Kind: "move", Names: []string{"report.pdf"}, Done: true}, "Moved report.pdf"},
+		{app.Job{Kind: "delete", Names: two, Done: true, Stopped: true}, "Stopped deleting 2 items"},
+		{app.Job{Kind: "copy", Names: two, Done: true, Failed: true}, "Couldn’t copy 2 items"},
 	} {
-		if got := whereLines(c.j); got != c.want {
-			t.Errorf("a job from %q to %q says %q, want %q", c.j.From, c.j.To, got, c.want)
+		if got := jobHeading(c.j); got != c.want {
+			t.Errorf("%+v is headed %q, want %q", c.j, got, c.want)
 		}
-	}
-	if got := namesLines(app.Job{Names: []string{"report.pdf"}}); got != "   report.pdf" {
-		t.Errorf("a job of one name lists %q, want it named", got)
 	}
 }

@@ -41,18 +41,17 @@ type Job struct {
 	// and Kind is copy, move or delete.
 	Machine machines.ID
 	Kind    string
-	// From is where the names are, and To where they go, each a folder
-	// and the machine it is on: "C:\Users\me on this computer". A delete
-	// has no To.
-	From, To string
+	// From is where the names are, and To where they go. A delete has
+	// no To.
+	From, To JobEnd
 	// Detail says how far it has got, or how it ended.
 	Detail string
 	// Share is how much is done, from 0 to 1, and below zero while the
 	// job is still working out how much there is.
 	Share float32
-	// Done is set once it has stopped, and Failed when that was for a
-	// reason other than finishing or being cancelled.
-	Done, Failed bool
+	// Done is set once it has stopped, Stopped when the user stopped it,
+	// and Failed when it was for any other reason but finishing.
+	Done, Stopped, Failed bool
 	// Names are what it works on, Current the one it is on, and Ticked
 	// how many of Names are done, when they are counted one by one.
 	Names   []string
@@ -69,6 +68,15 @@ type Job struct {
 	// Started is when it started, and Finished when it stopped, zero
 	// while it runs.
 	Started, Finished time.Time
+}
+
+// JobEnd is a folder a job works in.
+type JobEnd struct {
+	// Folder is the folder's own name, Path all of it as the machine
+	// types it, and Machine what the machine is called. Local says the
+	// machine is this computer.
+	Folder, Path, Machine string
+	Local                 bool
 }
 
 // KindJobs is the jobs pane.
@@ -175,9 +183,9 @@ func (a *app) showJobs() bool {
 		}
 		row := jobRow(r, p)
 		row.Saved = a.isSaved(r)
-		row.From = a.jobPlace(r.op.At, r.from)
+		row.From = a.jobEnd(r.op.At, r.from)
 		if r.op.Kind != jobs.Delete {
-			row.To = a.jobPlace(r.op.Into, r.to)
+			row.To = a.jobEnd(r.op.Into, r.to)
 		}
 		rows = append(rows, row)
 		if !p.Done {
@@ -213,13 +221,29 @@ func (a *app) showJobs() bool {
 	return live
 }
 
-// jobPlace says a folder a job works in, and the machine it is on.
-func (a *app) jobPlace(dir string, on machines.ID) string {
-	name := "this computer"
+// jobEnd is the folder dir on the machine on, for the jobs pane.
+func (a *app) jobEnd(dir string, on machines.ID) JobEnd {
+	end := JobEnd{Path: typedOn(dir), Machine: "this computer", Local: on == machines.Local}
 	if a.machines != nil {
-		name = a.machines.Name(on)
+		end.Machine = a.machines.Name(on)
 	}
-	return typedOn(dir) + " on " + name
+	end.Folder = folderName(end.Path)
+	return end
+}
+
+// folderName is the last name in path, and the path itself for a root
+// such as / or C:\. A Windows path, C:\… or \\server\…, is cut at
+// either slash; any other at / alone, as a name there may hold a \.
+func folderName(path string) string {
+	seps := "/"
+	if len(path) >= 2 && path[1] == ':' || strings.HasPrefix(path, `\\`) {
+		seps = `/\`
+	}
+	trimmed := strings.TrimRight(path, seps)
+	if trimmed == "" || strings.HasSuffix(trimmed, ":") {
+		return path
+	}
+	return trimmed[strings.LastIndexAny(trimmed, seps)+1:]
 }
 
 // jobRow is a job as the pane shows it.
@@ -247,6 +271,7 @@ func jobRow(r *running, p jobs.Progress) Job {
 		// A job the user stopped says so, and how far it got; one that
 		// failed, or left half a file behind, says why.
 		row.Failed = jobs.Trouble(p.Err) != nil
+		row.Stopped = !row.Failed
 		said = append(said, jobs.Outcome(p))
 		if p.FilesDone > 0 {
 			said = append(said, words.Count(p.FilesDone, "file")+" done")

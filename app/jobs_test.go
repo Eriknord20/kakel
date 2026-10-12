@@ -344,3 +344,21 @@ func TestTheNewestJobIsListedFirstWithWhenItRan(t *testing.T) {
 		}
 	}
 }
+
+// A job's folder is named by the last name in its path, cut at either
+// slash only in a Windows path, and a root by itself.
+func TestAJobsFolderIsNamedByItsLastName(t *testing.T) {
+	for path, want := range map[string]string{
+		"/tmp/jt/src":       "src",
+		"/srv/www/":         "www",
+		"/":                 "/",
+		`C:\Users\me`:       "me",
+		`C:\`:               `C:\`,
+		`\\nas\share\photo`: "photo",
+		`/home/a\b`:         `a\b`,
+	} {
+		if got := folderName(path); got != want {
+			t.Errorf("%q is named %q, want %q", path, got, want)
+		}
+	}
+}

@@ -2,6 +2,7 @@ package view
 
 import (
 	"fmt"
+	"image/color"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/marrasen/gunim/icon"
 	gi "github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
+	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
 
 	"github.com/marrasen/kakel/settings"
@@ -100,72 +102,108 @@ func (p *jobsPane) Paint(pt *paint.Painter, f gunim.Frame, box geom.Size, kids g
 	kids.At(3).Paint(pt)
 }
 
-// jobCard is one job: its title and what can be done with it, where
-// it works from and to, its progress, a graph of its speed, the names
-// it works on with the ones done ticked, and what it is doing or how it
-// ended. Cancel shows while it runs; a finished copy offers Repeat
-// and Save this copy.
+// jobCard is one job. Along its top, a badge with the kind of job in
+// the colour of how it goes, what it does to what, a line on how far
+// it has got or how it ended, and what can be done with it. Under them,
+// while it runs, its progress and a graph of its speed; the folder it
+// works from and the one it works to, each on its machine; and the
+// items it works on, each waiting, going or done.
 type jobCard struct {
-	title  *widget.Label
-	where  *widget.Label
-	detail *widget.Label
-	names  *widget.Label
-	bar    *widget.ProgressBar
-	graph  *widget.LiveGraph
+	badge   *jobBadge
+	title   *widget.Label
+	summary *widget.Label
+	bar     *widget.ProgressBar
+	graph   *widget.LiveGraph
 	// sampled is how many of the job's speed samples the graph has.
 	sampled int
-	cancel  *widget.Button
-	repeat  *widget.Button
-	save    *widget.Checkbox
-	// acts are the controls showing now, along the title's row.
+	route   *jobRoute
+	items   *widget.Wrap
+	chips   []*itemChip
+	// running says the job runs, so the bar and the graph show.
+	running bool
+	// saved says the copy is on the saved list.
+	saved  bool
+	cancel *widget.Button
+	save   *widget.Button
+	repeat *widget.Button
+	drop   *widget.IconButton
+	// acts are the controls showing now, at the end of the top row.
 	acts []gunim.Node
 }
 
+// jobCardKids is how many children a card has before its controls.
+const jobCardKids = 7
+
+// mostItems is how many of a job's items its card names.
+const mostItems = 12
+
 func newJobCard(j app.Job) *jobCard {
 	c := &jobCard{
-		title: widget.NewLabel(""), where: widget.NewLabel(""), detail: widget.NewLabel(""), names: widget.NewLabel(""),
+		badge: newJobBadge(), title: widget.NewLabel(""), summary: widget.NewLabel(""),
 		bar: widget.NewProgressBar(), graph: widget.NewLiveGraph(app.SampleEvery, app.MostSpeeds),
-		cancel: iconButton(icon.CircleStop, "Cancel"), repeat: iconButton(icon.Repeat, "Repeat"), save: widget.NewCheckbox("Save this copy"),
+		route:  newJobRoute(),
+		cancel: iconButton(icon.CircleStop, "Cancel"), save: iconButton(icon.Bookmark, "Save"),
+		repeat: iconButton(icon.Repeat, "Repeat"), drop: widget.NewIconButton(icon.X, "Take off the list"),
 	}
+	c.title.Face, c.title.MaxLines = widget.BoldFont, 1
+	c.summary.Size, c.summary.MaxLines = smallText, 2
 	c.graph.Label = func(v float64) string { return words.Size(int64(v)) + "/s" }
-	c.title.MaxLines, c.detail.MaxLines = 1, 1
-	c.detail.Size, c.detail.Color = smallText, look.Faint
-	c.names.Size, c.where.Size = smallText, smallText
-	c.cancel.OnClick, c.repeat.OnClick = widget.Sends(app.CancelJob{ID: j.ID}), widget.Sends(app.RepeatJob{ID: j.ID})
+	c.cancel.Ghost, c.save.Ghost = true, true
+	c.save.Tooltip = "Keep this copy on the Saved Copies list, to do again"
 	id := j.ID
-	c.save.OnChange = func(on bool, u *gunim.UI) gunim.Intent { return app.SaveCopy{ID: id, On: on} }
+	c.cancel.OnClick, c.repeat.OnClick = widget.Sends(app.CancelJob{ID: id}), widget.Sends(app.RepeatJob{ID: id})
+	c.drop.OnClick = widget.Sends(app.DropJob{ID: id})
+	c.save.OnClick = func(*gunim.UI) gunim.Intent { return app.SaveCopy{ID: id, On: !c.saved} }
+	var chips []gunim.Node
+	for i, name := range j.Names {
+		if i == mostItems-1 && len(j.Names) > mostItems {
+			more := newItemChip(fmt.Sprintf("and %d more", len(j.Names)-i))
+			more.plain = true
+			chips = append(chips, more)
+			break
+		}
+		chip := newItemChip(name)
+		c.chips = append(c.chips, chip)
+		chips = append(chips, chip)
+	}
+	c.items = widget.NewWrap(chips...)
+	c.items.Gap = itemGap
 	c.acts = c.want(j)
 	c.fill(j, nil)
 	return c
 }
 
-// want are the controls a job's row offers.
+// itemGap is the space between the items on a job's card.
+var itemGap = theme.Length("kakel.jobs.chip.gap", 6)
+
+// want are the controls a job's card offers.
 func (c *jobCard) want(j app.Job) []gunim.Node {
 	switch {
 	case !j.Done:
 		return []gunim.Node{c.cancel}
 	case j.Repeatable:
-		return []gunim.Node{c.save, c.repeat}
+		return []gunim.Node{c.save, c.repeat, c.drop}
 	}
-	return nil
+	return []gunim.Node{c.drop}
 }
 
 // fill says j on the card. The bar moves to its share, or jumps there
 // with u nil, for a card new to the pane.
 func (c *jobCard) fill(j app.Job, u *gunim.UI) {
+	c.running = !j.Done
 	c.bar.Indeterminate = j.Share < 0 && !j.Done
 	if j.Share >= 0 {
 		c.bar.SetValue(j.Share, u)
 	}
-	c.title.Text = j.Title
-	c.where.Text = whereLines(j)
-	c.detail.Text = j.Detail
+	c.badge.show(j)
+	c.title.Text = jobHeading(j)
+	c.summary.Text = j.Detail
 	if when := jobWhen(j, time.Now()); when != "" {
-		c.detail.Text = strings.TrimPrefix(c.detail.Text+" · "+when, " · ")
+		c.summary.Text = strings.TrimPrefix(c.summary.Text+" · "+when, " · ")
 	}
-	c.detail.Color = look.Faint
+	c.summary.Color = look.Faint
 	if j.Failed {
-		c.detail.Color = widget.DialogProblem
+		c.summary.Color = widget.DialogProblem
 	}
 	// The samples taken since the card last looked, into the graph,
 	// which slides on every frame while the job runs.
@@ -175,8 +213,57 @@ func (c *jobCard) fill(j app.Job, u *gunim.UI) {
 	}
 	c.sampled = j.Sampled
 	c.graph.SetRunning(!j.Done)
-	c.save.SetChecked(j.Saved, nil)
-	c.names.Text = namesLines(j)
+	c.saved = j.Saved
+	c.save.Active = j.Saved
+	c.save.Label, c.save.Icon = "Save", icon.Bookmark
+	if j.Saved {
+		c.save.Label, c.save.Icon = "Saved", icon.BookmarkCheck
+	}
+	c.route.show(j.From, j.To)
+	for i, chip := range c.chips {
+		switch {
+		case j.Current != "" && chip.name.Text == j.Current:
+			chip.show(itemGoing)
+		case j.Done && !j.Failed && !j.Stopped, i < j.Ticked:
+			chip.show(itemDone)
+		default:
+			chip.show(itemWaiting)
+		}
+	}
+}
+
+// jobHeading says what a job does, or did, to what: "Copying 6 items",
+// "Moved report.pdf", "Stopped deleting 2 items".
+func jobHeading(j app.Job) string {
+	what := words.Count(len(j.Names), "item")
+	if len(j.Names) == 1 {
+		what = j.Names[0]
+	}
+	verb := map[string][3]string{
+		"copy":   {"copy", "copying", "copied"},
+		"move":   {"move", "moving", "moved"},
+		"delete": {"delete", "deleting", "deleted"},
+	}[j.Kind]
+	if verb[0] == "" {
+		verb = [3]string{"copy", "copying", "copied"}
+	}
+	switch {
+	case !j.Done:
+		return upFirst(verb[1]) + " " + what
+	case j.Failed:
+		return "Couldn’t " + verb[0] + " " + what
+	case j.Stopped:
+		return "Stopped " + verb[1] + " " + what
+	}
+	return upFirst(verb[2]) + " " + what
+}
+
+// upFirst is s with its first letter a capital.
+func upFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // jobWhen says when a job ran, as of now: when it started while it
@@ -217,40 +304,6 @@ func took(d time.Duration) string {
 	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
 }
 
-// whereLines says where a job works: the folder it reads from and the
-// one it writes to, or the one it deletes in.
-func whereLines(j app.Job) string {
-	switch {
-	case j.From == "":
-		return ""
-	case j.To == "":
-		return "In " + j.From
-	}
-	return "From " + j.From + "\nTo " + j.To
-}
-
-// namesLines lists what a job works on, the one it is on marked and
-// the ones done ticked, and at most ten of them.
-func namesLines(j app.Job) string {
-	const most = 10
-	var out []string
-	for i, n := range j.Names {
-		if i == most-1 && len(j.Names) > most {
-			out = append(out, fmt.Sprintf("   and %d more", len(j.Names)-i))
-			break
-		}
-		mark := "   "
-		switch {
-		case n == j.Current:
-			mark = "›  "
-		case j.Done && !j.Failed, i < j.Ticked:
-			mark = "✓  "
-		}
-		out = append(out, mark+n)
-	}
-	return strings.Join(out, "\n")
-}
-
 // show brings the card up to date with j.
 func (c *jobCard) show(j app.Job, u *gunim.UI) {
 	c.fill(j, u)
@@ -270,71 +323,359 @@ func (c *jobCard) show(j app.Job, u *gunim.UI) {
 
 // Children implements [gunim.Composite].
 func (c *jobCard) Children() []gunim.Node {
-	return append([]gunim.Node{c.title, c.detail, c.bar, c.graph, c.names, c.where}, c.acts...)
+	return append([]gunim.Node{c.badge, c.title, c.summary, c.bar, c.graph, c.route, c.items}, c.acts...)
 }
 
-// Layout implements [gunim.Node].
+// Layout implements [gunim.Node]: the badge, the words beside it and
+// the controls at the end make the top row, and the rest lines up
+// under the words.
 func (c *jobCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
-	const pad, gap = 16, 10
+	const pad, gap, badgeGap = 16, 12, 14
 	w := cs.Max.W
-	right := w - pad
-	line := float32(0)
+	badge, title, summary, bar, graph, route, items := kids.At(0), kids.At(1), kids.At(2), kids.At(3), kids.At(4), kids.At(5), kids.At(6)
+	bs := badge.Layout(gunim.Constraints{})
+	left := float32(pad + bs.W + badgeGap)
+	inner := max(0, w-left-pad)
+	// The controls, from the end of the top row.
 	byNode := map[gunim.Node]gunim.Child{}
-	for i := 6; i < kids.Len(); i++ {
+	for i := jobCardKids; i < kids.Len(); i++ {
 		byNode[kids.At(i).Node()] = kids.At(i)
 	}
-	sizes := map[gunim.Node]geom.Size{}
-	for _, n := range c.acts {
-		if k, ok := byNode[n]; ok {
-			sizes[n] = k.Layout(gunim.Constraints{Max: geom.Sz(w, 40)})
-			line = max(line, sizes[n].H)
-		}
+	right, row := w-pad, float32(0)
+	type placed struct {
+		k gunim.Child
+		s geom.Size
 	}
+	var acts []placed
 	for i := len(c.acts) - 1; i >= 0; i-- {
-		n := c.acts[i]
-		k, ok := byNode[n]
-		if !ok {
-			continue
+		if k, ok := byNode[c.acts[i]]; ok {
+			s := k.Layout(gunim.Constraints{Max: geom.Sz(w, 40)})
+			right -= s.W
+			acts = append(acts, placed{k, s})
+			k.Place(geom.Pt(right, 0))
+			right -= 4
+			row = max(row, s.H)
 		}
-		right -= sizes[n].W
-		k.Place(geom.Pt(right, pad+(line-sizes[n].H)/2))
-		right -= gap
 	}
-	title, detail, bar, graph, names, where := kids.At(0), kids.At(1), kids.At(2), kids.At(3), kids.At(4), kids.At(5)
-	ts := title.Layout(gunim.Constraints{Max: geom.Sz(max(0, right-pad), 40)})
-	line = max(line, ts.H)
-	title.Place(geom.Pt(pad, pad+(line-ts.H)/2))
-	y := pad + line + gap
-	if ws := where.Layout(gunim.Constraints{Max: geom.Sz(max(0, w-2*pad), 400)}); c.where.Text != "" && ws.H > 0 {
-		where.Place(geom.Pt(pad, y-gap/2))
-		y += ws.H + gap/2
+	words := max(0, right-left-gap)
+	ts := title.Layout(gunim.Constraints{Max: geom.Sz(words, 40)})
+	ss := summary.Layout(gunim.Constraints{Max: geom.Sz(words, 80)})
+	text := ts.H + 3 + ss.H
+	top := max(bs.H, text, row)
+	badge.Place(geom.Pt(pad, pad+(top-bs.H)/2))
+	title.Place(geom.Pt(left, pad+(top-text)/2))
+	summary.Place(geom.Pt(left, pad+(top-text)/2+ts.H+3))
+	x := right + 4
+	for i := len(acts) - 1; i >= 0; i-- {
+		a := acts[i]
+		a.k.Place(geom.Pt(x, pad+(top-a.s.H)/2))
+		x += a.s.W + 4
 	}
-	bs := bar.Layout(gunim.Constraints{Max: geom.Sz(max(0, w-2*pad), 20)})
-	bar.Place(geom.Pt(pad, y))
-	y += bs.H + gap/2
-	gs := graph.Layout(gunim.Constraints{Max: geom.Sz(max(0, w-2*pad), 80)})
-	graph.Place(geom.Pt(pad, y))
-	if gs.H > 0 {
-		y += gs.H + gap/2
+	y := pad + top + gap
+	if c.running {
+		s := bar.Layout(gunim.Constraints{Max: geom.Sz(inner, 20)})
+		bar.Place(geom.Pt(left, y))
+		y += s.H + 8
+		if gs := graph.Layout(gunim.Constraints{Max: geom.Sz(inner, 56)}); gs.H > 0 {
+			graph.Place(geom.Pt(left, y))
+			y += gs.H + gap
+		}
 	}
-	ds := detail.Layout(gunim.Constraints{Max: geom.Sz(max(0, w-2*pad), 40)})
-	detail.Place(geom.Pt(pad, y))
-	y += ds.H
-	ns := names.Layout(gunim.Constraints{Max: geom.Sz(max(0, w-2*pad), 400)})
-	if c.names.Text != "" && ns.H > 0 {
-		y += gap
-		names.Place(geom.Pt(pad, y))
-		y += ns.H
+	if rs := route.Layout(gunim.Constraints{Max: geom.Sz(inner, 0)}); rs.H > 0 {
+		route.Place(geom.Pt(left, y))
+		y += rs.H + gap
 	}
-	return cs.Constrain(geom.Sz(w, y+pad))
+	if len(c.chips) > 0 {
+		is := items.Layout(gunim.Constraints{Max: geom.Sz(inner, 0)})
+		items.Place(geom.Pt(left, y))
+		y += is.H + gap
+	}
+	return cs.Constrain(geom.Sz(w, y-gap+pad))
 }
 
 // Paint implements [gunim.Node].
 func (c *jobCard) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	p.RRect(geom.Rect{Max: box.Point()}, widget.CardRadius.Get(f.Theme), paint.Solid(widget.CardFill.Get(f.Theme)))
-	for k := range kids.All {
-		k.Paint(p)
+	for i := 0; i < kids.Len(); i++ {
+		switch {
+		case (i == 3 || i == 4) && !c.running, i == 6 && len(c.chips) == 0:
+			continue
+		}
+		kids.At(i).Paint(p)
 	}
+}
+
+// jobBadge is the kind of job, as an icon on a square of the colour of
+// how it goes: the accent while it runs, then green, red when it
+// failed, or faint when it was stopped.
+type jobBadge struct {
+	icon *widget.Icon
+	tint theme.Token[color.NRGBA]
+}
+
+func newJobBadge() *jobBadge {
+	return &jobBadge{icon: widget.NewIcon(icon.Copy, ""), tint: widget.Accent}
+}
+
+// show says j on the badge.
+func (b *jobBadge) show(j app.Job) {
+	switch j.Kind {
+	case "move":
+		b.icon.Icon = icon.FolderInput
+	case "delete":
+		b.icon.Icon = icon.Trash2
+	default:
+		b.icon.Icon = icon.Copy
+	}
+	switch {
+	case !j.Done:
+		b.tint = widget.Accent
+	case j.Failed:
+		b.tint = widget.ToastErrorInk
+	case j.Stopped:
+		b.tint = look.Faint
+	default:
+		b.tint = widget.ToastSuccessInk
+	}
+	b.icon.Color = b.tint
+}
+
+// Children implements [gunim.Composite].
+func (b *jobBadge) Children() []gunim.Node { return []gunim.Node{b.icon} }
+
+// Layout implements [gunim.Node].
+func (b *jobBadge) Layout(_ gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	const side = 38
+	s := kids.At(0).Layout(gunim.Constraints{Max: geom.Sz(side, side)})
+	kids.At(0).Place(geom.Pt((side-s.W)/2, (side-s.H)/2))
+	return geom.Sz(side, side)
+}
+
+// Paint implements [gunim.Node].
+func (b *jobBadge) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
+	fill := b.tint.Get(f.Theme)
+	fill.A = 0x2a
+	p.RRect(geom.Rect{Max: box.Point()}, 10, paint.Solid(fill))
+	kids.At(0).Paint(p)
+}
+
+// jobRoute is where a job works: the folder it works from, an arrow
+// and the folder it works to, side by side where there is room and one
+// over the other where there is not. A delete has the one folder.
+type jobRoute struct {
+	from, to *jobEndBox
+	arrow    *widget.Icon
+	// one says there is only the folder the job works in.
+	one bool
+}
+
+func newJobRoute() *jobRoute {
+	r := &jobRoute{from: newJobEndBox(), to: newJobEndBox(), arrow: widget.NewIcon(icon.ArrowRight, "to")}
+	r.arrow.Color = look.Faint
+	return r
+}
+
+// show says the folders from and to.
+func (r *jobRoute) show(from, to app.JobEnd) {
+	r.from.show(from)
+	r.to.show(to)
+	r.one = to.Path == ""
+}
+
+// Children implements [gunim.Composite].
+func (r *jobRoute) Children() []gunim.Node { return []gunim.Node{r.from, r.arrow, r.to} }
+
+// Layout implements [gunim.Node].
+func (r *jobRoute) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	const gap = 10
+	w := cs.Max.W
+	from, arrow, to := kids.At(0), kids.At(1), kids.At(2)
+	if r.from.path.Text == "" {
+		return geom.Size{}
+	}
+	if r.one {
+		s := from.Layout(gunim.Tight(geom.Sz(w, 0)))
+		from.Place(geom.Point{})
+		return geom.Sz(w, s.H)
+	}
+	as := arrow.Layout(gunim.Constraints{})
+	if w >= 420 {
+		// Side by side, as tall as each other.
+		bw := (w - as.W - 2*gap) / 2
+		h := max(from.Layout(gunim.Constraints{Min: geom.Sz(bw, 0), Max: geom.Sz(bw, 0)}).H,
+			to.Layout(gunim.Constraints{Min: geom.Sz(bw, 0), Max: geom.Sz(bw, 0)}).H)
+		from.Layout(gunim.Tight(geom.Sz(bw, h)))
+		to.Layout(gunim.Tight(geom.Sz(bw, h)))
+		r.arrow.Icon = icon.ArrowRight
+		from.Place(geom.Point{})
+		arrow.Place(geom.Pt(bw+gap, (h-as.H)/2))
+		to.Place(geom.Pt(bw+as.W+2*gap, 0))
+		return geom.Sz(w, h)
+	}
+	// One over the other, the arrow pointing down between them.
+	r.arrow.Icon = icon.ArrowDown
+	fs := from.Layout(gunim.Tight(geom.Sz(w, 0)))
+	from.Place(geom.Point{})
+	arrow.Place(geom.Pt(14, fs.H+4))
+	y := fs.H + 4 + as.H + 4
+	ts := to.Layout(gunim.Tight(geom.Sz(w, 0)))
+	to.Place(geom.Pt(0, y))
+	return geom.Sz(w, y+ts.H)
+}
+
+// Paint implements [gunim.Node].
+func (r *jobRoute) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+	if !r.one {
+		kids.At(1).Paint(p)
+		kids.At(2).Paint(p)
+	}
+}
+
+// jobEndBox is a folder a job works in: the machine it is on, its name
+// and its whole path.
+type jobEndBox struct {
+	machine    *widget.Icon
+	on         *widget.Label
+	name, path *widget.Label
+}
+
+func newJobEndBox() *jobEndBox {
+	b := &jobEndBox{machine: widget.NewIcon(icon.Monitor, ""), on: widget.NewLabel(""), name: widget.NewLabel(""), path: widget.NewLabel("")}
+	b.machine.Color, b.machine.Size = look.Faint, endIconSize
+	b.on.Size, b.on.Color, b.on.MaxLines = smallText, look.Faint, 1
+	b.name.MaxLines = 1
+	b.path.Size, b.path.Color, b.path.MaxLines = smallText, look.Faint, 2
+	return b
+}
+
+// endIconSize is the size of the machine's icon over a folder.
+var endIconSize = theme.Length("kakel.jobs.machine.icon", 14)
+
+// show says e in the box.
+func (b *jobEndBox) show(e app.JobEnd) {
+	b.machine.Icon = icon.Server
+	if e.Local {
+		b.machine.Icon = icon.Monitor
+	}
+	b.on.Text, b.name.Text, b.path.Text = e.Machine, e.Folder, e.Path
+}
+
+// Children implements [gunim.Composite].
+func (b *jobEndBox) Children() []gunim.Node { return []gunim.Node{b.machine, b.on, b.name, b.path} }
+
+// Layout implements [gunim.Node]: the machine along the top, the
+// folder's name under it, and its path under that unless the name says
+// it all. The box is as tall as it is asked to be, or as its lines.
+func (b *jobEndBox) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	const padX, padY = 12, 10
+	w := cs.Max.W
+	inner := max(0, w-2*padX)
+	machine, on, name, path := kids.At(0), kids.At(1), kids.At(2), kids.At(3)
+	ms := machine.Layout(gunim.Constraints{})
+	os := on.Layout(gunim.Constraints{Max: geom.Sz(max(0, inner-ms.W-6), 0)})
+	line := max(ms.H, os.H)
+	machine.Place(geom.Pt(padX, padY+(line-ms.H)/2))
+	on.Place(geom.Pt(padX+ms.W+6, padY+(line-os.H)/2))
+	y := padY + line + 6
+	ns := name.Layout(gunim.Constraints{Max: geom.Sz(inner, 0)})
+	name.Place(geom.Pt(padX, y))
+	y += ns.H
+	if b.path.Text != b.name.Text {
+		ps := path.Layout(gunim.Constraints{Max: geom.Sz(inner, 0)})
+		path.Place(geom.Pt(padX, y+2))
+		y += 2 + ps.H
+	}
+	return geom.Sz(w, max(y+padY, cs.Min.H))
+}
+
+// Paint implements [gunim.Node].
+func (b *jobEndBox) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
+	p.RRect(geom.Rect{Max: box.Point()}, 8, paint.Solid(faintFill(f)))
+	for i := 0; i < kids.Len(); i++ {
+		if i == 3 && b.path.Text == b.name.Text {
+			continue
+		}
+		kids.At(i).Paint(p)
+	}
+}
+
+// faintFill is the ink, barely there, to set something apart on a card
+// in a dark theme or a light one.
+func faintFill(f gunim.Frame) color.NRGBA {
+	c := widget.Ink.Get(f.Theme)
+	c.A = 0x0d
+	return c
+}
+
+// itemState is how far a job has got with one of its items.
+type itemState int
+
+const (
+	itemWaiting itemState = iota
+	itemGoing
+	itemDone
+)
+
+// itemChip is an item a job works on, marked by how far the job has
+// got with it. A plain one is only words, such as "and 3 more".
+type itemChip struct {
+	mark  *widget.Icon
+	name  *widget.Label
+	plain bool
+}
+
+func newItemChip(name string) *itemChip {
+	c := &itemChip{mark: widget.NewIcon(icon.CircleDashed, ""), name: widget.NewLabel(name)}
+	c.mark.Size = endIconSize
+	c.name.Size, c.name.MaxLines = smallText, 1
+	c.show(itemWaiting)
+	return c
+}
+
+// show marks the chip s.
+func (c *itemChip) show(s itemState) {
+	c.mark.Spin = false
+	switch s {
+	case itemGoing:
+		c.mark.Icon, c.mark.Color, c.mark.Spin = icon.LoaderCircle, widget.Accent, true
+	case itemDone:
+		c.mark.Icon, c.mark.Color = icon.CircleCheck, widget.ToastSuccessInk
+	default:
+		c.mark.Icon, c.mark.Color = icon.CircleDashed, look.Faint
+	}
+	c.name.Color = widget.Ink
+	if s == itemWaiting {
+		c.name.Color = look.Faint
+	}
+}
+
+// Children implements [gunim.Composite].
+func (c *itemChip) Children() []gunim.Node { return []gunim.Node{c.mark, c.name} }
+
+// Layout implements [gunim.Node].
+func (c *itemChip) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	const padX, h = 8, 24
+	x := float32(padX)
+	if !c.plain {
+		ms := kids.At(0).Layout(gunim.Constraints{})
+		kids.At(0).Place(geom.Pt(x, (h-ms.H)/2))
+		x += ms.W + 6
+	}
+	ns := kids.At(1).Layout(gunim.Constraints{Max: geom.Sz(max(0, cs.Max.W-x-padX), 0)})
+	kids.At(1).Place(geom.Pt(x, (h-ns.H)/2))
+	return geom.Sz(x+ns.W+padX, h)
+}
+
+// Paint implements [gunim.Node].
+func (c *itemChip) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
+	if c.plain {
+		kids.At(1).Paint(p)
+		return
+	}
+	p.RRect(geom.Rect{Max: box.Point()}, box.H/2, paint.Solid(faintFill(f)))
+	kids.At(0).Paint(p)
+	kids.At(1).Paint(p)
 }
 
 // copiesPane lists the copies kept, to do again: Enter does the one
