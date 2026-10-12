@@ -490,25 +490,22 @@ func TestAFileManagerTabComesIn(t *testing.T) {
 }
 
 // A tab's title that does not fit gives way to its short one, a
-// server's folder without the server, and that ends in an ellipsis
-// where it does not fit either: the end of a title cut off said nothing,
-// and "Skylake: " was all a server's tab showed.
+// server's folder without the server, as "Skylake: " was all a server's
+// tab showed. Either way the tab says it cut the title, for the tooltip
+// to show it whole.
 func TestATabTitleThatDoesNotFitKeepsItsFolder(t *testing.T) {
 	const size = 13
 	shape := func(s string) text.Run { return text.Default().Shape(s, size) }
-	b := &tabBar{shapedSize: size, titles: []text.Run{shape("Skylake: build")}, names: []string{"Skylake: build"}, shorts: []string{"build"}}
-	if got := b.fitTitle(0, 500); got.Advance != shape("Skylake: build").Advance {
-		t.Errorf("with room the tab says %v wide, want all of its title", got.Advance)
+	full, short := shape("Skylake: build"), shape("build")
+	b := &tabBar{shapedSize: size, titles: []text.Run{full}, names: []string{"Skylake: build"}, shorts: []text.Run{short}}
+	if got, cut := b.fitTitle(0, 500); got.Advance != full.Advance || cut {
+		t.Errorf("with room the tab says %v wide, cut %v, want all of its title", got.Advance, cut)
 	}
-	short := shape("build").Advance
-	if got := b.fitTitle(0, short+2); got.Advance != short {
-		t.Errorf("with room for the folder the tab says %v wide, want the folder's %v", got.Advance, short)
+	if got, cut := b.fitTitle(0, full.Advance-2); got.Advance != short.Advance || !cut {
+		t.Errorf("short of room the tab says %v wide, cut %v, want the folder's %v, cut", got.Advance, cut, short.Advance)
 	}
-	if got, least := b.fitTitle(0, short-4), shape("b…").Advance; got.Advance > short-4 || got.Advance < least {
-		t.Errorf("with less room the tab says %v wide, want the folder cut with an ellipsis, %v to %v", got.Advance, least, short-4)
-	}
-	b.shorts[0] = ""
-	if got := b.fitTitle(0, 60); got.Advance > 60 {
-		t.Errorf("a title with nothing shorter is %v wide in 60, want it cut to fit", got.Advance)
+	b.shorts[0] = shape("")
+	if got, cut := b.fitTitle(0, 30); got.Advance != full.Advance || !cut {
+		t.Errorf("a title with nothing shorter says %v wide, cut %v, want all of it, faded, and cut", got.Advance, cut)
 	}
 }

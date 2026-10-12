@@ -3,7 +3,6 @@ package view
 import (
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/marrasen/kakel/app"
@@ -42,9 +41,11 @@ type tabBar struct {
 	titles []text.Run
 	more   []text.Run
 	names  []string
-	shorts []string
-	// fitted are titles cut to the room a tab has, by title and room.
-	fitted map[fitKey]text.Run
+	shorts []text.Run
+	// cut says which tabs showed less than their title when last drawn,
+	// and so show it all in a tooltip under the pointer.
+	cut []bool
+	tip widget.PartTip
 	// boxes are where the tabs are, plus where the + is, and end where
 	// the tabs and the + end.
 	boxes []geom.Rect
@@ -222,12 +223,13 @@ func (b *tabBar) show(tabs []app.Tab, focus string, u *gunim.UI) (from float32, 
 	if !slices.Equal(titles, b.shaped) || size != b.shapedSize {
 		b.shaped, b.shapedSize = titles, size
 		b.titles, b.more, b.names, b.shorts = b.titles[:0], b.more[:0], b.names[:0], b.shorts[:0]
-		clear(b.fitted)
 		for i := 0; i < len(titles); i += 3 {
 			b.titles = append(b.titles, text.Default().Shape(titles[i], size))
-			b.names, b.shorts = append(b.names, titles[i]), append(b.shorts, titles[i+1])
+			b.names = append(b.names, titles[i])
+			b.shorts = append(b.shorts, text.Default().Shape(titles[i+1], size))
 			b.more = append(b.more, text.Default().Shape(titles[i+2], size-1))
 		}
+		b.cut = make([]bool, len(tabs))
 	}
 	if !b.wanted() {
 		// Going, nothing on it is pressed or lit; a tab carried away
@@ -434,44 +436,28 @@ func (w *Window) tabShort(t app.Tab) string {
 	return ""
 }
 
-// fitKey is a title and the room it was cut to.
-type fitKey struct {
-	title string
-	room  int
+// fitTitle is what tab i says in room: its title where it fits, or
+// else its short title where it has one. cut says that is less than all
+// of the title; what passes the room fades out as it is drawn.
+func (b *tabBar) fitTitle(i int, room float32) (run text.Run, cut bool) {
+	full := b.titles[i]
+	switch {
+	case full.Advance <= room:
+		return full, false
+	case i < len(b.shorts) && b.shorts[i].Advance > 0:
+		return b.shorts[i], true
+	}
+	return full, true
 }
 
-// fitTitle is what tab i says in room: its title where it fits, or else
-// its short title, cut short with an ellipsis where that does not fit
-// either, as the end of a title cut off says nothing.
-func (b *tabBar) fitTitle(i int, room float32) text.Run {
-	full := b.titles[i]
-	if full.Advance <= room || i >= len(b.names) {
-		return full
+// tipOf is the tooltip for the pointer at pos: the whole title of the
+// tab there where the tab shows less of it, and "" anywhere else.
+func (b *tabBar) tipOf(pos geom.Point) string {
+	i := b.tabAt(pos)
+	if i < 0 || b.carried != 0 || i >= len(b.cut) || !b.cut[i] || i >= len(b.names) {
+		return ""
 	}
-	s := b.names[i]
-	if short := b.shorts[i]; short != "" {
-		s = short
-	}
-	key := fitKey{s, int(room)}
-	if run, ok := b.fitted[key]; ok {
-		return run
-	}
-	run := text.Default().Shape(s, b.shapedSize)
-	if run.Advance > room {
-		const ellipsis = "…"
-		left := room - text.Default().Shape(ellipsis, b.shapedSize).Advance
-		rs := []rune(s)
-		n := min(max(run.Index(left), 0), len(rs))
-		for n > 0 && run.CaretX(n) > left {
-			n--
-		}
-		run = text.Default().Shape(strings.TrimRight(string(rs[:n]), " :")+ellipsis, b.shapedSize)
-	}
-	if b.fitted == nil {
-		b.fitted = map[fitKey]text.Run{}
-	}
-	b.fitted[key] = run
-	return run
+	return b.names[i]
 }
 
 // tabKind is the kind of the pane tab t shows, for its icon.
@@ -650,10 +636,22 @@ func (b *tabBar) paintTab(p *paint.Painter, th *theme.Live, t app.Tab, title, mo
 	}
 	if stop > x {
 		func() {
-			defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(x, r.Min.Y, stop-x, r.Size().H), Opacity: 1, Clip: true})()
-			if l.at >= 0 {
-				title = b.fitTitle(l.at, stop-x)
+			room := stop - x
+			if l.at >= 0 && l.at < len(b.titles) {
+				var cut bool
+				title, cut = b.fitTitle(l.at, room)
+				if l.at < len(b.cut) {
+					b.cut[l.at] = cut
+				}
 			}
+			// What passes the room fades out, rather than stopping
+			// short at its edge.
+			fade := float32(0)
+			if title.Advance > room {
+				fade = min(widget.ScrollFade.Get(th), room/2)
+			}
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(x, r.Min.Y, room, r.Size().H), Opacity: 1, Clip: true,
+				Fade: geom.Insets{Right: fade}})()
 			title.Paint(p, geom.Pt(x, mid-title.Height()/2), c)
 		}()
 	}
@@ -714,6 +712,17 @@ func (b *tabBar) CaptionRects(size geom.Size) []geom.Rect {
 // The ends of what began while the bar showed, a press let go and a
 // drag ended, are heard while it is hidden too.
 func (b *tabBar) Handle(e input.Event, u *gunim.UI) bool {
+	// A title the tab cuts short shows whole under the pointer.
+	switch e := e.(type) {
+	case input.PointerMove:
+		b.tip.Handle(e, u, b, b.tipOf(e.Pos))
+	case input.PointerEnter:
+		b.tip.Handle(e, u, b, b.tipOf(e.Pos))
+	case input.PointerDown:
+		b.tip.Handle(e, u, b, b.tipOf(e.Pos))
+	case input.PointerLeave, input.Scroll:
+		b.tip.Handle(e, u, b, "")
+	}
 	switch e := e.(type) {
 	case input.PointerMove:
 		if !b.shown() {
