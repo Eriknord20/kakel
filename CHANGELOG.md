@@ -7,6 +7,129 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.0
+
+Everything from the 23 betas, v0.12.0-beta.1 to v0.12.0-beta.23, for
+those coming from v0.11.1. Each beta's own notes are in CHANGELOG.md.
+
+### Added
+
+**The file manager is a pane.** It splits beside a terminal, goes in a
+tab, docks, and moves between windows like any pane, and it takes
+kakel's theme. Files opens one beside the pane in front. Files in a
+New Window, and a folder opened from Windows, open a kakel window
+holding one, which keeps its own size and place. Its dialogs cover the
+pane alone, so the terminal beside it keeps working.
+
+**One menu bar that follows the pane in front.** While a file manager
+is in front, its lines join kakel's File, Edit and View menus, and a Go
+menu comes after View. Edit's Cut, Copy, Paste and Select All act on
+the files.
+
+**In the file manager:**
+- Open with… on a file's menu, on Windows, as a submenu.
+- Extract… unpacks a zip or tar archive (.zip, .tar, .tar.gz, .tgz,
+  .tar.bz2, .tbz2) into a new folder beside it, on servers too.
+- Create zip… and Paste as zip…, across machines too.
+- Zips with a password: it opens ZipCrypto and AES zips, and Create
+  zip… and Paste as zip… can encrypt with AES-256. The password
+  question offers your saved secrets.
+- A viewer: Space, or View, shows a file over the window. Code is in
+  its language's colours, Markdown is rendered, and anything else
+  shows as hex. A Ctrl+click on a file's path in a terminal opens it
+  at the line named.
+- Git status: a pane showing a folder in a git repository says the
+  branch, how far it is ahead or behind, and how many files changed,
+  on a line along its bottom.
+- The selection slides to its new place, and stretches with Shift.
+- Back selects the folder you came out of.
+- Files on a server are titled with the server, as "web: log", and
+  the path bar starts with the machine's name.
+- Show in folder selects the file, as Firefox asks for a download.
+
+**A paste of several lines opens in an editor first**, coloured for the
+pane's shell: bash, PowerShell or the Command Prompt. Lines written for
+another shell get marked, with a note on what to write instead.
+Settings › Terminal › Show before pasting turns it off.
+
+**All Panes (Ctrl+Shift+A) shows every kakel window over the whole
+screen**, as cards with live panes. Pick a pane to go to it, or drag
+panes between windows. The launcher offers it too.
+
+**A theme editor.** Edit Theme, in Settings › Appearance or the
+palette, edits colours, motion, corners and text size, with a preview.
+Nothing changes until you press Save.
+
+**Panes in a split have titles you can drag**, to dock the pane
+somewhere else, make it a tab, or give it a window of its own. A middle
+click on the title closes it.
+
+**Secrets can lock themselves after a time unused**, from 1 minute to 8
+hours, or Never (the default).
+
+**Beta releases.** Settings › General › Beta releases has updates take
+betas. `install.ps1` and `install.sh` install the newest beta with
+`KAKEL_BETA=1`.
+
+### Changed
+
+- Servers is now called Machines.
+- Settings opens as a tab in the window in front.
+- Switching tabs glides the highlight and fades in what the tab holds.
+- The + on the tab bar opens a tab like the one in front.
+- Dragging a tab or pane over another tab brings that tab to the
+  front.
+- The launcher (Win+Shift+K) and the palette (Ctrl+Shift+K) use the
+  same words, list shells by name, and offer saved windows, copies and
+  tunnels. A machine's choices are chips on its line.
+- Files from the launcher or the tray open in a new tab. Settings ›
+  General › Launcher › Files open in changes it.
+- New terminal commands say what they open, such as "New PowerShell 7"
+  or "New Terminal on skylake".
+- A pane on a server is named after the server.
+- A pane in another kakel window shows the window icon and says which
+  machine it is on.
+- Secrets: Edit shows the password, "For" is now "User name", and
+  Type says which terminal it types into.
+- A failed copy says in words what failed and why, and offers Retry.
+- The Jobs pane lists the newest job first, with times, on redesigned
+  cards. Click a folder on a card to open it in Files.
+- A repeated job and the file manager ask the same Replace question.
+- Remove, not Forget, for saved commands, tunnels, favourites and
+  copies.
+- Text that does not fit fades out instead of ending in "…". Hover to
+  see it whole.
+- The file list's Size and Modified columns fit their text.
+- Coloured terminal text that contrasts less than 4.5:1 with its
+  background is lightened or darkened until it reads.
+- Number fields in the theme editor and Settings change as you drag
+  them.
+- Every notice and error kakel shows is also in the Window Log.
+
+### Fixed
+
+- No more freezes on Intel graphics on Windows (gunim issue #30).
+- Ctrl+C stops a program in cmd or PowerShell again after an update.
+- A folder opened from Windows comes to the front.
+- Question windows keep their size and no longer snap to half the
+  screen.
+- A docked terminal keeps its text as it slides in.
+- The file list stays where you scrolled it, and a long Shift+Down
+  keeps its selection.
+- The arrow keys move through a tall sidebar, and go on from where a
+  deleted file was.
+- A long path in the path bar scrolls with the wheel.
+- Text keeps its width through a theme switch, and a row's text and
+  icon scroll together.
+
+### Removed
+
+- The old file pane, with its key bar, Go To (`Ctrl+Shift+G`) and zip
+  files opened as folders. The file manager does what the rest did.
+- View in Reader and Follow in Reader. The viewer replaces them.
+- The Updates dialog. Settings › General › Updates has the same choice.
+- "New Terminal, Default Shell". Type a shell's name to open it.
+
 ## v0.12.0-beta.23
 
 ### Changed
