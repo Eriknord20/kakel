@@ -61,3 +61,22 @@ func TestTheTestsCopyToAClipboardOfTheirOwn(t *testing.T) {
 		}
 	}
 }
+
+// A program that sends bytes that are not text with OSC 52 is told
+// nothing was copied, rather than that it was: the clipboard holds
+// text, and Windows refuses a NUL outright.
+func TestAProgramCopyingBytesIsToldNothingWasCopied(t *testing.T) {
+	a := fontApp(t)
+	for _, sent := range []string{"\x30\x82\x11\x64", "key\x00store"} {
+		a.st.Notices = nil
+		a.programCopied("p1", sent)
+		if len(a.st.Notices) != 1 || a.st.Notices[0].Title != "Not copied" || a.st.Notices[0].Clipboard != "" {
+			t.Fatalf("copying %q, the notices are %+v", sent, a.st.Notices)
+		}
+	}
+	a.st.Notices = nil
+	a.programCopied("p1", "MIIRZAIBAzCCEQ4G")
+	if len(a.st.Notices) != 1 || a.st.Notices[0].Title != "Copied to the clipboard" || a.st.Notices[0].Clipboard != "MIIRZAIBAzCCEQ4G" {
+		t.Fatalf("copying text, the notices are %+v", a.st.Notices)
+	}
+}

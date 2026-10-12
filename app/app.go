@@ -1866,11 +1866,23 @@ func (a *app) hooks(id string) screen.Hooks {
 			a.events <- func() { a.commandDone(id, status) }
 		},
 		Clipboard: func(s string) {
-			a.events <- func() {
-				a.worked("Copied to the clipboard", fmt.Sprintf("%d characters, from %s", utf8.RuneCountInString(s), a.titleOf(id)), s)
-			}
+			a.events <- func() { a.programCopied(id, s) }
 		},
 	}
+}
+
+// programCopied puts s, which the program in pane id sent with OSC 52,
+// on the clipboard. The clipboard holds text, so bytes that are not
+// text are turned away and the user told: Windows refuses a NUL, and
+// the toast would otherwise say it was copied when nothing was. That
+// happens when a file is sent as it is, base64 once, where the program
+// meant to copy the file's base64.
+func (a *app) programCopied(id, s string) {
+	if !utf8.ValidString(s) || strings.ContainsRune(s, 0) {
+		a.failed("Not copied", fmt.Sprintf("%s sent %d bytes that are not text, and the clipboard holds text. To copy a file's base64, base64 it twice: once for the text, once for OSC 52.", a.titleOf(id), len(s)))
+		return
+	}
+	a.worked("Copied to the clipboard", fmt.Sprintf("%d characters, from %s", utf8.RuneCountInString(s), a.titleOf(id)), s)
 }
 
 // open opens a shell on machine, "" for this one, as a new pane placed
