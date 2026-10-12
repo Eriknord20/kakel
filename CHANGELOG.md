@@ -7,6 +7,49 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.0-beta.22
+
+### Changed
+
+**The launcher (Win+Shift+K) offers everything saved.** Saved kakel
+windows are listed as machines, with a window icon and "kakel window".
+Saved copies ("Copy a.txt") and saved tunnels ("Tunnel …, via web") are
+there too, and picking one runs it again. The palette (Ctrl+Shift+K)
+lists saved kakel windows as well.
+
+**Files from the launcher or the tray open in a new tab**, not split
+beside a file manager in the window last worked in. Settings › General
+› Launcher › Files open in changes it: New tab, Beside, or New window.
+
+**A terminal on another kakel window says which machine it is on:**
+"PowerShell 7 on skylake", in its tab, the window's title and All
+Panes.
+
+**Secrets: Edit shows the password.** Edit (was Change) opens with the
+saved password or note in, hidden until Show password is ticked. "For"
+is now "User name", the account the secret signs in as. A new secret
+is named after the server in front. A secret saved at sign-in says
+where it signs in by itself.
+
+**Secrets: Type says which terminal it types into,** such as "Type
+into PowerShell 7 on skylake", and types into that one only. With no
+terminal to type into, it is greyed out.
+
+**One replace question.** A repeated job and the file manager ask the
+same way when a file is there already: Replace “name”?, with the sizes
+and dates of both, Apply to all, and Skip, Keep Both, Stop and Replace.
+Keep Both puts the new one beside under a free name.
+
+**Remove, not Forget.** Saved commands, tunnels, favourites and copies
+are removed, as servers, secrets and keys are.
+
+### Fixed
+
+- The title bar's "Agent Share" and "Serving" chips sat on a dark
+  patch: the window's colour showed through behind them.
+- An SSH agent message named a command that does not exist, "Forget
+  unlocked keys". It now names Lock SSH Keys.
+
 ## v0.12.0-beta.21
 
 ### Changed
