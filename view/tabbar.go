@@ -3,6 +3,7 @@ package view
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/marrasen/kakel/app"
@@ -35,9 +36,15 @@ type tabBar struct {
 	tabs  []app.Tab
 	front int
 	// titles are the tabs' titles, shaped, and more how many other
-	// panes each tab holds, shaped too.
+	// panes each tab holds, shaped too. names are the titles as words,
+	// and shorts what each tab says where its title does not fit, ""
+	// for nothing shorter: a server's folder without the server.
 	titles []text.Run
 	more   []text.Run
+	names  []string
+	shorts []string
+	// fitted are titles cut to the room a tab has, by title and room.
+	fitted map[fitKey]text.Run
 	// boxes are where the tabs are, plus where the + is, and end where
 	// the tabs and the + end.
 	boxes []geom.Rect
@@ -182,13 +189,13 @@ func (b *tabBar) show(tabs []app.Tab, focus string, u *gunim.UI) (from float32, 
 			front = t.Group
 		}
 	}
-	titles := make([]string, 0, 2*len(tabs))
+	titles := make([]string, 0, 3*len(tabs))
 	for _, t := range tabs {
 		more := ""
 		if t.Panes > 1 {
 			more = "+" + strconv.Itoa(t.Panes-1)
 		}
-		titles = append(titles, b.w.tabTitle(t), more)
+		titles = append(titles, b.w.tabTitle(t), b.w.tabShort(t), more)
 	}
 	size := smallText.Get(u.Theme()) + 1
 	if slices.Equal(tabs, b.tabs) && front == b.front && slices.Equal(titles, b.shaped) && size == b.shapedSize {
@@ -214,10 +221,12 @@ func (b *tabBar) show(tabs []app.Tab, focus string, u *gunim.UI) (from float32, 
 	b.tabs, b.front = tabs, front
 	if !slices.Equal(titles, b.shaped) || size != b.shapedSize {
 		b.shaped, b.shapedSize = titles, size
-		b.titles, b.more = b.titles[:0], b.more[:0]
-		for i := 0; i < len(titles); i += 2 {
+		b.titles, b.more, b.names, b.shorts = b.titles[:0], b.more[:0], b.names[:0], b.shorts[:0]
+		clear(b.fitted)
+		for i := 0; i < len(titles); i += 3 {
 			b.titles = append(b.titles, text.Default().Shape(titles[i], size))
-			b.more = append(b.more, text.Default().Shape(titles[i+1], size-1))
+			b.names, b.shorts = append(b.names, titles[i]), append(b.shorts, titles[i+1])
+			b.more = append(b.more, text.Default().Shape(titles[i+2], size-1))
 		}
 	}
 	if !b.wanted() {
@@ -410,6 +419,61 @@ func (w *Window) tabTitle(t app.Tab) string {
 	return ""
 }
 
+// tabShort is what tab t says where its title does not fit: the pane's
+// own title, where the tab's names the machine before it, as "web:
+// logs" does, and "" where nothing is shorter.
+func (w *Window) tabShort(t app.Tab) string {
+	for _, p := range w.panes {
+		if p.ID == t.Pane {
+			if p.Title != "" && p.Title != w.titleOf(p) {
+				return p.Title
+			}
+			return ""
+		}
+	}
+	return ""
+}
+
+// fitKey is a title and the room it was cut to.
+type fitKey struct {
+	title string
+	room  int
+}
+
+// fitTitle is what tab i says in room: its title where it fits, or else
+// its short title, cut short with an ellipsis where that does not fit
+// either, as the end of a title cut off says nothing.
+func (b *tabBar) fitTitle(i int, room float32) text.Run {
+	full := b.titles[i]
+	if full.Advance <= room || i >= len(b.names) {
+		return full
+	}
+	s := b.names[i]
+	if short := b.shorts[i]; short != "" {
+		s = short
+	}
+	key := fitKey{s, int(room)}
+	if run, ok := b.fitted[key]; ok {
+		return run
+	}
+	run := text.Default().Shape(s, b.shapedSize)
+	if run.Advance > room {
+		const ellipsis = "…"
+		left := room - text.Default().Shape(ellipsis, b.shapedSize).Advance
+		rs := []rune(s)
+		n := min(max(run.Index(left), 0), len(rs))
+		for n > 0 && run.CaretX(n) > left {
+			n--
+		}
+		run = text.Default().Shape(strings.TrimRight(string(rs[:n]), " :")+ellipsis, b.shapedSize)
+	}
+	if b.fitted == nil {
+		b.fitted = map[fitKey]text.Run{}
+	}
+	b.fitted[key] = run
+	return run
+}
+
 // tabKind is the kind of the pane tab t shows, for its icon.
 func (w *Window) tabKind(t app.Tab) string {
 	if t.Panes > 1 {
@@ -489,7 +553,7 @@ func (b *tabBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, _ gunim.C
 	}
 	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(widget.MenubarFill.Get(th)))
 	for _, g := range b.gone {
-		b.paintTab(p, th, g.tab, g.title, g.more, g.kind, g.box.Value(), g.open.Value(), tabLook{})
+		b.paintTab(p, th, g.tab, g.title, g.more, g.kind, g.box.Value(), g.open.Value(), tabLook{at: -1})
 	}
 	// The front tab's fill, under the tabs, where it glides between
 	// them, as faint as the tab is while it opens.
@@ -504,6 +568,7 @@ func (b *tabBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, _ gunim.C
 	for i, t := range b.tabs {
 		r, open := b.drawnAt(i)
 		b.paintTab(p, th, t, b.titles[i], b.more[i], b.w.tabKind(t), r, open, tabLook{
+			at:       i,
 			front:    t.Group == b.front,
 			lit:      b.litOf(t.Group),
 			hot:      i == b.hot && b.carried == 0,
@@ -531,6 +596,9 @@ func (b *tabBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, _ gunim.C
 // far its title has the front tab's ink, 0 to 1, as the tab in front
 // changes.
 type tabLook struct {
+	// at is the tab's place in the bar, to fit its title to its room,
+	// and -1 for one going, whose title is shown as it was.
+	at                                  int
 	front, hot, lifted, cross, crossLit bool
 	lit                                 float32
 }
@@ -583,6 +651,9 @@ func (b *tabBar) paintTab(p *paint.Painter, th *theme.Live, t app.Tab, title, mo
 	if stop > x {
 		func() {
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(x, r.Min.Y, stop-x, r.Size().H), Opacity: 1, Clip: true})()
+			if l.at >= 0 {
+				title = b.fitTitle(l.at, stop-x)
+			}
 			title.Paint(p, geom.Pt(x, mid-title.Height()/2), c)
 		}()
 	}
