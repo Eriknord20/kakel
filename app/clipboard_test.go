@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/marrasen/gunim"
 	"github.com/marrasen/kakel/clip"
 )
 
@@ -78,5 +79,15 @@ func TestAProgramCopyingBytesIsToldNothingWasCopied(t *testing.T) {
 	a.programCopied("p1", "MIIRZAIBAzCCEQ4G")
 	if len(a.st.Notices) != 1 || a.st.Notices[0].Title != "Copied to the clipboard" || a.st.Notices[0].Clipboard != "MIIRZAIBAzCCEQ4G" {
 		t.Fatalf("copying text, the notices are %+v", a.st.Notices)
+	}
+}
+
+// A copy the clipboard would not take is said, in words, rather than
+// left to look like one that worked.
+func TestACopyTheClipboardRefusedIsSaid(t *testing.T) {
+	a := fontApp(t)
+	a.handle(gunim.ClipboardFailed{Reason: "glfw: the text holds a NUL character, which the clipboard cannot hold"})
+	if len(a.st.Notices) != 1 || a.st.Notices[0].Title != "Couldn't copy to the clipboard" || a.st.Notices[0].Body != "The text holds a NUL character, which the clipboard cannot hold." {
+		t.Fatalf("the notices are %+v", a.st.Notices)
 	}
 }

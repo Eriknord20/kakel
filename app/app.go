@@ -1633,6 +1633,8 @@ func (a *app) handle(in gunim.Intent) {
 		a.noTextToPaste()
 	case ClipboardUnreadable:
 		a.failed("Couldn't read the clipboard", in.Why)
+	case gunim.ClipboardFailed:
+		a.failed("Couldn't copy to the clipboard", words.UpperFirst(strings.TrimPrefix(in.Reason, "glfw: "))+".")
 	case MakePortable:
 		a.makePortable()
 	case ShowHelp:
