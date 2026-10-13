@@ -1066,8 +1066,12 @@ func (t *titleFader) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids 
 		kids.At(0).Paint(p)
 		return
 	}
-	// The compact menu's button is the bar's height and a little more.
-	button := widget.MenubarHeight.Get(f.Theme) + 4
+	// The bar's fill stays as the title fades, or the room beside the
+	// button, while the tabs show, would be the window's background.
+	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(widget.MenubarFill.Get(f.Theme)))
+	// The compact menu's button is the bar's height and a little more,
+	// 4 in from the bar's start.
+	button := widget.MenubarHeight.Get(f.Theme) + 8
 	func() {
 		defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(0, 0, button, box.H), Opacity: 1, Clip: true})()
 		kids.At(0).Paint(p)

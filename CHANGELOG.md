@@ -11,6 +11,14 @@ change how something behaves.
 
 ### Added
 
+**The file manager's filter can look in the folders under this one.**
+Click the button beside the filter field, or pick Go › Filter
+subfolders too. What you type then finds matching items anywhere under
+the folder, and a Folder column says where each one sits. Right-click
+an item and pick Go to its folder to open the folder it is in, with
+the item selected. The search stops at 200,000 items or 30 seconds, and
+the status bar says when it did.
+
 **A relay, for windows that cannot reach each other.** `kakel -relay`
 runs on a server with no screen and joins a served window and a window
 connecting to it, over WebSockets on HTTPS. It gets a certificate from
