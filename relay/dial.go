@@ -1,0 +1,281 @@
+package relay
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"sync"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+// dialWithin bounds reaching the relay and its answer: the connection,
+// any proxy, TLS and the WebSocket handshake.
+var dialWithin = 30 * time.Second
+
+// Dialer is how this machine reaches a relay.
+type Dialer struct {
+	// Proxy picks the HTTP proxy for a request, as http.Transport's
+	// does. A nil one goes straight to the relay.
+	Proxy func(*http.Request) (*url.URL, error)
+
+	// Dial makes the connection to the relay, or to the proxy when
+	// there is one: through a jump server, say. A nil one dials from
+	// this machine.
+	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
+// open opens a WebSocket to one of the relay's doors.
+func (d Dialer) open(ctx context.Context, to string, header http.Header) (*websocket.Conn, error) {
+	dial := d.Dial
+	if dial == nil {
+		nd := &net.Dialer{Timeout: dialWithin, KeepAlive: 30 * time.Second}
+		dial = nd.DialContext
+	}
+	// One transport a stream: the connection is the WebSocket's once it
+	// is open, and nothing is pooled.
+	tr := &http.Transport{
+		Proxy:               d.Proxy,
+		DialContext:         dial,
+		TLSHandshakeTimeout: dialWithin,
+		DisableKeepAlives:   true,
+	}
+	defer tr.CloseIdleConnections()
+	ctx, cancel := context.WithTimeout(ctx, dialWithin)
+	defer cancel()
+	ws, resp, err := websocket.Dial(ctx, to, &websocket.DialOptions{
+		HTTPClient:      &http.Client{Transport: tr},
+		HTTPHeader:      header,
+		CompressionMode: websocket.CompressionDisabled,
+	})
+	if err != nil {
+		if resp != nil && resp.StatusCode != http.StatusSwitchingProtocols {
+			return nil, said(resp, err)
+		}
+		return nil, err
+	}
+	return ws, nil
+}
+
+// reachErr says the relay could not be reached, and why.
+func reachErr(r URL, err error) error {
+	return fmt.Errorf("relay %s: %w", r.Host(), err)
+}
+
+// Join reaches the window served through a relay under link's code: the
+// stream it returns is the window's, for the serve protocol.
+func Join(ctx context.Context, link Link, d Dialer) (net.Conn, error) {
+	ws, err := d.open(ctx, link.Relay.to(doorJoin+"/"+link.Code), nil)
+	if err != nil {
+		return nil, reachErr(link.Relay, err)
+	}
+	return stream(ws, linkAddr(link.Shown())), nil
+}
+
+// stream is a WebSocket as a connection, pinged while it is open, so a
+// relay that has gone is noticed and a proxy sees it in use.
+func stream(ws *websocket.Conn, far net.Addr) net.Conn {
+	ctx, cancel := context.WithCancel(context.Background())
+	go keepUp(ctx, ws)
+	return &wsConn{Conn: websocket.NetConn(ctx, ws, websocket.MessageBinary), cancel: cancel, far: far}
+}
+
+// wsConn is a stream through a relay.
+type wsConn struct {
+	net.Conn
+	cancel context.CancelFunc
+	far    net.Addr
+}
+
+func (c *wsConn) Close() error {
+	err := c.Conn.Close()
+	c.cancel()
+	return err
+}
+
+// RemoteAddr is the window at the other end, as the relay named it.
+func (c *wsConn) RemoteAddr() net.Addr { return c.far }
+
+// linkAddr is the other end of a stream through a relay.
+type linkAddr string
+
+func (linkAddr) Network() string  { return "relay" }
+func (a linkAddr) String() string { return string(a) }
+
+// NewToken makes the token a served window keeps with its code.
+func NewToken() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// HostConfig is what serving through a relay needs.
+type HostConfig struct {
+	Relay URL
+	// Code is what a window connecting gives, and Token is what tells
+	// the relay this is the window the code is kept for.
+	Code, Token string
+	Dialer      Dialer
+	// OnState is told each time the window's place on the relay
+	// changes: nil once it is registered, and why not otherwise. It is
+	// called from the listener's goroutine.
+	OnState func(err error)
+}
+
+// tryAgainAfter is how long to wait before reaching the relay again,
+// after each failure in a row.
+var tryAgainAfter = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second,
+	10 * time.Second, 30 * time.Second, time.Minute}
+
+// Listener is a window served through a relay: the streams of the
+// windows connecting, one by one. It reaches the relay again by itself
+// whenever it loses it.
+type Listener struct {
+	cfg    HostConfig
+	ctx    context.Context
+	cancel context.CancelFunc
+	conns  chan net.Conn
+	once   sync.Once
+	// waits are tryAgainAfter as it was when it started.
+	waits []time.Duration
+}
+
+// Listen registers with the relay and keeps registered until closed.
+// It returns at once: how registering goes is told to OnState.
+func Listen(cfg HostConfig) (*Listener, error) {
+	switch {
+	case cfg.Relay.IsZero():
+		return nil, errors.New("no relay to serve through")
+	case cfg.Token == "":
+		return nil, errors.New("no token to register with")
+	}
+	code, err := ParseCode(cfg.Code)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Code = code
+	ctx, cancel := context.WithCancel(context.Background())
+	l := &Listener{cfg: cfg, ctx: ctx, cancel: cancel, conns: make(chan net.Conn),
+		waits: tryAgainAfter}
+	go l.stay()
+	return l, nil
+}
+
+// Accept waits for the next window connecting.
+func (l *Listener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.conns:
+		return c, nil
+	case <-l.ctx.Done():
+		return nil, net.ErrClosed
+	}
+}
+
+// Close leaves the relay. Streams already accepted are left to whoever
+// took them.
+func (l *Listener) Close() error {
+	l.once.Do(l.cancel)
+	return nil
+}
+
+// Addr is the window's link.
+func (l *Listener) Addr() net.Addr {
+	return linkAddr(Link{Relay: l.cfg.Relay, Code: l.cfg.Code}.String())
+}
+
+// state tells OnState, when there is one.
+func (l *Listener) state(err error) {
+	if l.cfg.OnState != nil && l.ctx.Err() == nil {
+		l.cfg.OnState(err)
+	}
+}
+
+// stay registers, and registers again each time the relay is lost,
+// waiting longer after each failure in a row.
+func (l *Listener) stay() {
+	tries := 0
+	for l.ctx.Err() == nil {
+		began := time.Now()
+		err := l.registered()
+		if l.ctx.Err() != nil {
+			return
+		}
+		// One that held for a while had the relay; losing it is a fresh
+		// start, not one more failure in a row.
+		if time.Since(began) > time.Minute {
+			tries = 0
+		}
+		l.state(err)
+		wait := l.waits[min(tries, len(l.waits)-1)]
+		tries++
+		select {
+		case <-l.ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
+}
+
+// registered registers once, and hears of windows connecting until the
+// relay is lost, returning why.
+func (l *Listener) registered() error {
+	header := http.Header{tokenHeader: {l.cfg.Token}}
+	q := url.Values{"code": {l.cfg.Code}}
+	ws, err := l.cfg.Dialer.open(l.ctx, l.cfg.Relay.to(doorHost)+"?"+q.Encode(), header)
+	if err != nil {
+		return reachErr(l.cfg.Relay, err)
+	}
+	defer func() { _ = ws.CloseNow() }()
+	ws.SetReadLimit(4 << 10)
+	ctx, cancel := context.WithCancel(l.ctx)
+	defer cancel()
+	go keepUp(ctx, ws)
+	l.state(nil)
+	for {
+		kind, line, err := ws.Read(ctx)
+		if err != nil {
+			if l.ctx.Err() != nil {
+				return nil
+			}
+			if why := websocket.CloseStatus(err); why != -1 {
+				var ce websocket.CloseError
+				if errors.As(err, &ce) && ce.Reason != "" {
+					return reachErr(l.cfg.Relay, errors.New(ce.Reason))
+				}
+			}
+			return reachErr(l.cfg.Relay, fmt.Errorf("lost: %w", err))
+		}
+		var k knock
+		if kind != websocket.MessageText || json.Unmarshal(line, &k) != nil || k.Ticket == "" {
+			continue
+		}
+		go l.bring(k)
+	}
+}
+
+// bring brings the stream for one window connecting, and hands it to
+// Accept.
+func (l *Listener) bring(k knock) {
+	header := http.Header{tokenHeader: {l.cfg.Token}}
+	ws, err := l.cfg.Dialer.open(l.ctx, l.cfg.Relay.to(doorAccept+"/"+url.PathEscape(k.Ticket)), header)
+	if err != nil {
+		return
+	}
+	from := k.From
+	if from == "" {
+		from = "somewhere"
+	}
+	c := stream(ws, linkAddr(from+" through "+l.cfg.Relay.Host()))
+	select {
+	case l.conns <- c:
+	case <-l.ctx.Done():
+		_ = c.Close()
+	}
+}

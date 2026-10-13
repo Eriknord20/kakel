@@ -7,6 +7,16 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## Unreleased
+
+### Added
+
+**A relay, for windows that cannot reach each other.** `kakel -relay`
+runs on a server with no screen and joins a served window and a window
+connecting to it, over WebSockets on HTTPS. It gets a certificate from
+Let's Encrypt with `-domain`, or runs on plain HTTP behind nginx or
+Caddy. Its URL holds a secret, and it answers nothing without it.
+
 ## v0.12.1-beta.1
 
 ### Fixed

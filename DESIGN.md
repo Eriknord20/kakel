@@ -50,6 +50,8 @@ Machines and connections:
 - `meter`: bytes moved, and how long ago.
 - `serve`: one kakel window connected to another: the listener, the
   client, and what they say to each other.
+- `relay`: `kakel -relay`, which joins a served window and one
+  connecting to it over WebSockets, and both windows' ends of it.
 - `vfs`: a filesystem kakel reads files through: this machine, or one
   over SFTP.
 - `jobs`: copying, moving and deleting in the background.

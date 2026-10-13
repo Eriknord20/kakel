@@ -181,6 +181,29 @@ machine's, and Remove Key… takes one off and hangs up on the window it
 let in. If you made that file a link to `~/.ssh/authorized_keys`, the
 keys added here may log in over ssh too.
 
+## Running a relay
+
+A relay joins two kakel windows that cannot reach each other: both
+reach the relay instead, over WebSockets on HTTPS, which gets through
+HTTP proxies. It runs on a server with no screen:
+
+    kakel -relay -domain relay.example.com
+
+That gets a certificate from Let's Encrypt, so ports 443 and 80 must be
+reachable. Behind nginx or Caddy doing HTTPS, run it on plain HTTP
+instead and point the proxy at it, passing WebSocket upgrades:
+
+    kakel -relay -listen 127.0.0.1:8080
+
+It prints its URL, ending in `/k/` and a secret. Without the secret the
+relay answers nothing, so keep the URL to the people who should use it.
+The secret is kept in `relay_secret` in kakel's private directory (or
+`-dir`); `-new-secret` makes a new one and the old URL stops working.
+
+The relay only carries bytes. The windows speak SSH to each other
+through it, so it cannot read what passes, and the served window still
+lets in only the keys it lists.
+
 ## Where kakel keeps its files
 
 Kakel keeps its files where the operating system puts a program's.
