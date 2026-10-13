@@ -1,6 +1,7 @@
 package view
 
 import (
+	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -133,6 +134,11 @@ func (w *Window) servedDialog(s app.Serving, u *gunim.UI) {
 	d.Body = form
 	d.SetButtons("Done", "")
 	w.keyActions(d, s)
+	d.AddAction("Use with ssh…", func(u *gunim.UI) gunim.Intent {
+		d.Close(u)
+		w.sshDialog(w.serving, u)
+		return nil
+	})
 	if s.Relayed {
 		d.AddAction("Copy Link", func(u *gunim.UI) gunim.Intent { return app.CopyRelayLink{} })
 		d.AddAction("New Code", func(u *gunim.UI) gunim.Intent { return app.NewRelayCode{} })
@@ -416,4 +422,87 @@ func (w *Window) throughPicker(picked machines.ID) (*widget.Dropdown, []machines
 		}
 	}
 	return d, ids
+}
+
+// sshDialog explains plain ssh's tunnels through this window, with the
+// commands as they would be typed on another machine: this one's port,
+// name, relay and saved machines, each with a Copy beside it.
+func (w *Window) sshDialog(s app.Serving, u *gunim.UI) {
+	host := s.Host
+	if host == "" {
+		host = "this-machine"
+	}
+	port := strconv.Itoa(s.Port)
+	if s.On && s.Addr != "" {
+		if _, p, err := net.SplitHostPort(s.Addr); err == nil {
+			port = p
+		}
+	}
+	direct := s.On && s.Addr != "" || !s.On && !s.NoPort
+	relayed := s.Relayed || !s.On && s.RelayOn
+	// A column rather than a form: the text has the width, and a form's
+	// column of names would stand empty beside all of it.
+	var parts []gunim.Node
+	say := func(text string) { parts = append(parts, widget.NewLabel(text)) }
+	say("Plain ssh, on any machine, can make tunnels through this window, with the same keys a kakel window connects with. There is no shell, so -N is always given.")
+	example := func(title, cmd string) {
+		line := selectable(cmd)
+		line.Face = widget.MonoFont
+		copyIt := widget.NewButton("Copy")
+		copyIt.OnClick = func(u *gunim.UI) gunim.Intent {
+			u.SetClipboard(cmd)
+			w.toast(widget.Toast{Title: "Command copied", Kind: widget.ToastSuccess}, u)
+			return nil
+		}
+		row := widget.Row(line, copyIt).Grow(line, 1)
+		row.Cross, row.Gap = widget.CrossCenter, settingsButtons
+		parts = append(parts, faintLabel(title), row)
+	}
+	if direct {
+		example("Port 8080 on the other machine reaches intranet port 80, as this machine finds it:",
+			"ssh -p "+port+" -N -L 8080:intranet:80 kakel@"+host)
+		if !s.Anywhere {
+			say("The port listens on this machine only. For another machine, serve on all networks, or through a relay.")
+		}
+	}
+	if relayed {
+		link := s.Link
+		if link == "" {
+			link = "<the relay's URL>#<code>"
+		}
+		example("Through the relay, with kakel on the other machine to reach it:",
+			`ssh -o ProxyCommand="kakel -relay-pipe `+link+`" -N -L 8080:intranet:80 kakel@`+host)
+	}
+	if !direct && !relayed {
+		say("Serve this window on a port or through a relay first.")
+	}
+	say("The user name says where the tunnel goes out from: kakel for this machine, or a machine saved here, by its name in lower case with dashes for spaces.")
+	var names []string
+	for _, h := range w.saved {
+		names = append(names, remote.CommandName(h.Name))
+	}
+	if len(names) > 0 {
+		at := "-p " + port + " "
+		if !direct {
+			at = ""
+		}
+		example("For instance, out from "+w.saved[0].Name+":", "ssh "+at+"-N -L 8080:intranet:80 "+names[0]+"@"+host)
+		parts = append(parts, selectable("Saved here: "+strings.Join(names, ", ")))
+	}
+	say("A saved server that is not connected is connected to on the way, when that needs nothing asked here: a key, or a password in the secrets while they are open. Otherwise the tunnel is refused, saying to connect it here first.")
+	if direct {
+		example("-J and -W work the same way. To reach intranet's own ssh through this window:",
+			"ssh -J kakel@"+host+":"+port+" user@intranet")
+	}
+	if s.Fingerprint != "" {
+		say("ssh asks to trust this window's host key the first time; it should be this one:")
+		parts = append(parts, selectable(s.Fingerprint))
+	}
+	d := widget.NewDialog("Tunnels with ssh")
+	col := widget.Column(parts...)
+	col.Gap = settingsButtons
+	d.Body = widget.NewSized(col, 560, 0)
+	d.SetButtons("Done", "")
+	d.OnAccept, d.OnDismiss = widget.Sends(app.DialogClosed{}), widget.Sends(app.DialogClosed{})
+	w.openDialog(d, u)
 }

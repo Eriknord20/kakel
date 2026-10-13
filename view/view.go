@@ -635,6 +635,9 @@ func (w *Window) run(id string, u *gunim.UI) bool {
 	case "serve.window":
 		w.servingDialog(w.serving, u)
 		return true
+	case "serve.ssh":
+		w.sshDialog(w.serving, u)
+		return true
 	case "agent.share":
 		w.shareDialog(w.share, u)
 		return true

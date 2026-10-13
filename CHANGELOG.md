@@ -45,6 +45,8 @@ and `-W` with the keys it allows. The user name says where the tunnel
 goes out from: `kakel@` for the served machine, or a machine saved
 there by name, connected to on the way when that needs nothing asked.
 `kakel -relay-pipe` is the ProxyCommand that takes ssh through a relay.
+"Tunnels with ssh…" explains it, with the commands for this window to
+copy.
 
 ## v0.12.1-beta.1
 

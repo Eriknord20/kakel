@@ -77,6 +77,9 @@ type Serving struct {
 	// RelayLast is the relay last connected to a window through, to
 	// offer again.
 	RelayLast string
+	// Host is this machine's name, for the ssh commands the window
+	// explains.
+	Host string
 	// Proxy is the HTTP proxy relays are reached through, as set: empty
 	// for the system's, relay.NoProxy for none.
 	Proxy string
@@ -611,6 +614,9 @@ func (a *app) showServing() {
 		r := a.settings.Relay()
 		s.RelayOn, s.NoPort, s.RelayURL, s.RelayVia = r.On, r.NoPort, r.URL, machines.ID(r.Via)
 		s.RelayLast, s.Proxy = a.settings.RelayLast(), a.settings.Proxy()
+	}
+	if host, err := os.Hostname(); err == nil {
+		s.Host = host
 	}
 	if code, _, err := a.relayKept(); err == nil {
 		s.Code = code

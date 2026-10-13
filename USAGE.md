@@ -241,6 +241,11 @@ Through a relay, ssh runs kakel to reach it:
 
 `-relay-pipe` takes `-proxy` for an HTTP proxy, or uses the system's.
 
+"Tunnels with ssh…", on the Share menu, in the served dialog and in
+Settings › Sharing, explains all this with the commands filled in for
+this window: its port, its name, its relay and the machines saved here,
+each with a Copy beside it.
+
 ## Running a relay
 
 A relay joins two kakel windows that cannot reach each other: both
