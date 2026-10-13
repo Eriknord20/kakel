@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/marrasen/kakel/relay"
 	"log"
 	"maps"
 	"net"
@@ -73,11 +74,18 @@ type (
 // are kept.
 const KnownWindowsFile = "known_windows"
 
-// serveAddr is an address with the serving port when it names none.
+// serveAddr is an address with the serving port when it names none,
+// or a link to a window through a relay, written the one way.
 func serveAddr(addr string) string {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		return ""
+	}
+	if relay.IsLink(addr) {
+		if l, err := relay.ParseLink(addr); err == nil {
+			return l.String()
+		}
+		return addr
 	}
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		return net.JoinHostPort(strings.Trim(addr, "[]"), strconv.Itoa(remote.ServePort))
@@ -90,24 +98,35 @@ func serveAddr(addr string) string {
 // for none.
 func (a *app) windowAt(addr string) machines.ID {
 	for _, id := range a.machines.IDs(func(m machines.Machine) bool { return m.Window != nil || m.Dialing != nil }) {
-		if w := a.machines.Get(id).Window; w != nil && links.SameTarget(serveAddr(w.Addr), addr) {
+		if w := a.machines.Get(id).Window; w != nil && sameWindow(serveAddr(w.Addr), addr) {
 			return id
 		}
-		if target, window, ok := a.machines.Quick(id); ok && window && links.SameTarget(serveAddr(target), addr) {
+		if target, window, ok := a.machines.Quick(id); ok && window && sameWindow(serveAddr(target), addr) {
 			return id
 		}
-		if h, ok := a.machines.Saved(id); ok && h.Window && links.SameTarget(h.ServeAddr(), addr) {
+		if h, ok := a.machines.Saved(id); ok && h.Window && sameWindow(h.ServeAddr(), addr) {
 			return id
 		}
 	}
 	if a.book != nil {
 		for _, h := range a.book.Hosts() {
-			if h.Window && links.SameTarget(h.ServeAddr(), addr) {
+			if h.Window && sameWindow(h.ServeAddr(), addr) {
 				return machines.ID(h.ID)
 			}
 		}
 	}
 	return ""
+}
+
+// sameWindow reports whether two windows' addresses reach the same
+// window: the same relay and code, or the same machine and port.
+func sameWindow(a, b string) bool {
+	if relay.IsLink(a) || relay.IsLink(b) {
+		la, errA := relay.ParseLink(a)
+		lb, errB := relay.ParseLink(b)
+		return errA == nil && errB == nil && la.Same(lb)
+	}
+	return links.SameTarget(a, b)
 }
 
 // connectWindow connects to a served window, and opens a terminal on
@@ -124,6 +143,16 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 	addr := serveAddr(in.Addr)
 	if addr == "" {
 		return errors.New("type the address of the window to connect to")
+	}
+	// A window through a relay is reached by the relay and its code.
+	var link *relay.Link
+	var dialer relay.Dialer
+	if relay.IsLink(addr) {
+		l, err := relay.ParseLink(addr)
+		if err != nil {
+			return err
+		}
+		link, dialer = &l, a.relayDialer()
 	}
 	name := in.ID
 	if name == "" {
@@ -161,7 +190,8 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 	dctx, cancel := context.WithCancel(a.ctx)
 	a.machines.At(name).Dialing = cancel
 	acct := a.dialLog(name)
-	logLine(acct, "", "connecting to the window at "+addr)
+	shown := relay.Shown(addr)
+	logLine(acct, "", "connecting to the window at "+shown)
 	logPane := ""
 	if !quiet {
 		logPane = a.watchDial(name)
@@ -171,7 +201,7 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 	called := oneLine(a.machines.Name(name))
 	a.showStatus()
 	go func() {
-		win, err := remote.ReachWindow(dctx, remote.Reach{
+		r := remote.Reach{
 			Addr: addr, KeyFile: strings.TrimSpace(in.KeyFile), Ring: a.ring, Ask: newAsker(a, name).keeping(kept),
 			Known:  knownWindows,
 			Saying: func(what string) { logLine(acct, "", what) },
@@ -179,7 +209,12 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 				logLine(acct, badly, what)
 				log.Printf("connecting to the window %s: %s", called, oneLine(what))
 			},
-		})
+		}
+		if link != nil {
+			r.Addr, r.Shown = link.KnownAs(), link.Shown()
+			r.Through = func(ctx context.Context) (net.Conn, error) { return relay.Join(ctx, *link, dialer) }
+		}
+		win, err := remote.ReachWindow(dctx, r)
 		a.events <- func() {
 			a.machines.At(name).Dialing = nil
 			cancel()
@@ -203,13 +238,17 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 					a.closePane(logPane)
 				}
 				if !quiet && !errors.Is(err, errDeclined) && !errors.Is(err, context.Canceled) {
-					a.failed("Couldn't connect to the window at "+addr, err.Error())
+					a.failed("Couldn't connect to the window at "+shown, err.Error())
 					a.problem()
 				}
 				return
 			}
 			logLine(acct, well, "connected in "+time.Since(began).Round(10*time.Millisecond).String())
-			log.Printf("connected to the window %s at %s", oneLine(a.machines.Name(name)), addr)
+			log.Printf("connected to the window %s at %s", oneLine(a.machines.Name(name)), shown)
+			if link != nil && a.settings != nil {
+				a.keep("the relay connected through", a.settings.PutRelayLast(link.Relay.String()))
+				a.showServing()
+			}
 			a.keepSignIns(kept)
 			if !quiet {
 				a.done()
@@ -338,7 +377,7 @@ func (a *app) windowGone(name machines.ID, w *machines.Window, why error) {
 		return
 	}
 	logLine(a.machines.Get(name).Log, "", "disconnected")
-	a.notify("Disconnected from the window at "+w.Addr, said, "")
+	a.notify("Disconnected from the window at "+relay.Shown(w.Addr), said, "")
 	a.showWindows()
 }
 

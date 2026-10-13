@@ -23,6 +23,10 @@ the other end and keeps it from one run to the next. Copy Link and New
 Code are in the served dialog, which says whether the relay is reached.
 Kakel reaches the relay again by itself when the network comes back.
 
+**Connect to a window through a relay.** Connect to Window takes a
+relay's URL and a code, or the copied link pasted whole. A kakel window
+in the server list can be one served through a relay, with its code.
+
 ## v0.12.1-beta.1
 
 ### Fixed

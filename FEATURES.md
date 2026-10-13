@@ -27,6 +27,13 @@ The whole list. The [README](README.md) has the short version.
   key but saying yes to its fingerprint, and a host key that changed is a
   hard failure. The window being served keeps drawing and says who is
   working in it. Closing the connection gives it its screen back.
+- **Through a relay, when neither can reach the other.** `kakel -relay`
+  runs on a server with no screen. A window served through it gets a
+  code, kept from one run to the next, and a window connecting gives the
+  relay that code. Both reach it over WebSockets on HTTPS, which gets
+  through HTTP proxies. The relay only carries bytes: the windows speak
+  SSH through it, the keys allowed in are the same, and the host key is
+  checked as for any window.
 - **Working in a shell that is already running over there.** The served
   window says what it has open, and choosing one of those rows opens a
   pane here on the program that is already running there, starting with

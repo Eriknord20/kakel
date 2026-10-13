@@ -305,23 +305,79 @@ func (w *Window) showServed(s app.Serving, u *gunim.UI) {
 	}
 }
 
-// connectWindowDialog asks for a served window to connect to.
+// connectWindowDialog asks for a served window to connect to: at an
+// address, or through a relay by its code.
 func (w *Window) connectWindowDialog(u *gunim.UI) {
+	how := widget.NewDropdown(widget.Labels("Directly", "Through a relay"))
+	how.Label = "Connect"
 	addr, key := widget.NewTextField(), widget.NewTextField()
 	addr.Placeholder = "host, or host:" + strconv.Itoa(remote.ServePort)
 	key.Placeholder = "the usual keys in ~/.ssh"
+	relayURL, code := widget.NewTextField(), widget.NewTextField()
+	relayURL.Placeholder = "https://relay.example.com/k/…"
+	code.Placeholder = "XXXX-XXXX"
+	if last := w.serving.RelayLast; last != "" {
+		relayURL.SetText(last, nil)
+		how.SetSelected(1, nil)
+	}
+	// A link pasted whole, the relay and the code, is split into the two.
+	relayURL.OnChange = func(text string, u *gunim.UI) gunim.Intent {
+		if l, err := relay.ParseLink(text); err == nil {
+			relayURL.SetText(l.Relay.String(), u)
+			code.SetText(l.Code, u)
+		}
+		return nil
+	}
+	addr.OnChange = func(text string, u *gunim.UI) gunim.Intent {
+		if l, err := relay.ParseLink(text); err == nil {
+			addr.SetText("", u)
+			relayURL.SetText(l.Relay.String(), u)
+			code.SetText(l.Code, u)
+			how.SetSelected(1, u)
+			u.Invalidate()
+		}
+		return nil
+	}
+	applies := func() {
+		viaRelay := how.Selected() == 1
+		addr.Disabled = viaRelay
+		relayURL.Disabled, code.Disabled = !viaRelay, !viaRelay
+	}
+	applies()
+	how.OnChange = func(int, *gunim.UI) gunim.Intent { applies(); return nil }
 	d := widget.NewDialog("Connect to Window")
 	d.Body = widget.NewForm().
 		Add("", widget.NewLabel("The other window must be served, with this machine's public key in its authorized keys.")).
-		Add("Address", addr).Add("Key file", key)
+		Add("Connect", how).Add("Address", addr).Add("Relay", relayURL).Add("Code", code).Add("Key file", key)
 	d.SetButtons("Connect", "Cancel")
+	link := func() (string, string) {
+		u, err := relay.ParseURL(relayURL.Text())
+		if err != nil {
+			return "", words.UpperFirst(err.Error()) + "."
+		}
+		c, err := relay.ParseCode(code.Text())
+		if err != nil {
+			return "", words.UpperFirst(err.Error()) + "."
+		}
+		return relay.Link{Relay: u, Code: c}.String(), ""
+	}
 	d.Check = func() string {
+		if how.Selected() == 1 {
+			_, why := link()
+			return why
+		}
 		if strings.TrimSpace(addr.Text()) == "" {
 			return "Type the other window's address."
 		}
 		return ""
 	}
-	d.OnAccept = func(u *gunim.UI) gunim.Intent { return app.ConnectWindow{Addr: addr.Text(), KeyFile: key.Text()} }
+	d.OnAccept = func(u *gunim.UI) gunim.Intent {
+		to := addr.Text()
+		if how.Selected() == 1 {
+			to, _ = link()
+		}
+		return app.ConnectWindow{Addr: to, KeyFile: key.Text()}
+	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
 }

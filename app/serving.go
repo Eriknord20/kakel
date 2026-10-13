@@ -8,6 +8,7 @@ import (
 	"log"
 	"maps"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -70,6 +71,9 @@ type Serving struct {
 	Relayed      bool
 	Reached      bool
 	RelayTrouble string
+	// RelayLast is the relay last connected to a window through, to
+	// offer again.
+	RelayLast string
 	// Allowed are the keys that may connect, by name, from the file at
 	// AllowedAt, Keys the same keys with their fingerprints, and
 	// Problem what stops that file being read.
@@ -372,7 +376,7 @@ func (a *app) startServing(in StartServing) error {
 	var rl *relay.Listener
 	if in.Relay {
 		kept := a.keptRelay(relayURL)
-		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: kept.Code, Token: kept.Token,
+		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: kept.Code, Token: kept.Token, Dialer: a.relayDialer(),
 			OnState: func(err error) { post(func() { a.relayState(rl, err) }) }})
 		if err != nil {
 			return err
@@ -583,6 +587,7 @@ func (a *app) showServing() {
 	if a.settings != nil {
 		r := a.settings.Relay()
 		s.RelayOn, s.NoPort, s.RelayURL, s.Code = r.On, r.NoPort, r.URL, r.Code
+		s.RelayLast = a.settings.RelayLast()
 	}
 	if rl := a.serving.relay; rl != nil {
 		s.RelayURL, s.Code = rl.Relay().String(), rl.Code()
@@ -1214,4 +1219,10 @@ func (a *app) servedLast() StartServing {
 	s := a.st.Serving
 	return StartServing{Port: strconv.Itoa(s.Port), Anywhere: s.Anywhere,
 		NoPort: s.NoPort, Relay: s.RelayOn, RelayURL: s.RelayURL}
+}
+
+// relayDialer is how this machine reaches a relay: through the HTTP
+// proxy the system names, if any.
+func (a *app) relayDialer() relay.Dialer {
+	return relay.Dialer{Proxy: http.ProxyFromEnvironment}
 }

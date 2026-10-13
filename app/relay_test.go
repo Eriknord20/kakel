@@ -3,6 +3,7 @@ package app
 import (
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/marrasen/kakel/relay"
@@ -55,5 +56,45 @@ func TestServingNowhereIsRefused(t *testing.T) {
 	}
 	if err := a.startServing(StartServing{NoPort: true, Relay: true, RelayURL: "relay.example.com"}); err == nil {
 		t.Fatal("served through a relay URL with no secret")
+	}
+}
+
+func TestAWindowConnectsThroughARelay(t *testing.T) {
+	a, _ := agentApp(t)
+	dir := t.TempDir()
+	a.serving.hostKey, a.serving.allowed = filepath.Join(dir, "host_key"), filepath.Join(dir, "authorized_keys")
+	b, keyFile := clientOf(t, a)
+	if err := a.stopServing(); err != nil {
+		t.Fatal(err)
+	}
+	a.handle(StartServing{NoPort: true, Relay: true, RelayURL: testRelay(t)})
+	t.Cleanup(func() { _ = a.stopServing() })
+	waitFor(t, a, "the relay to have it", func() bool { return a.st.Serving.Reached })
+	link, err := relay.ParseLink(a.st.Serving.Link)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Typed as the two fields give it: the relay, and the code in
+	// lower case with no dash.
+	typed := link.Relay.String() + "#" + strings.ToLower(strings.ReplaceAll(link.Code, "-", ""))
+	b.handle(ConnectWindow{Addr: typed, KeyFile: keyFile})
+	pumpBoth(t, a, b, "the question about the host key", func() bool { return len(b.st.Asks) > 0 })
+	if q := b.st.Asks[0].Text; !strings.Contains(q, link.Shown()) || strings.Contains(q, "/k/") {
+		t.Fatalf("asked %q", q)
+	}
+	b.handle(AskAnswered{ID: b.st.Asks[0].ID, Yes: true})
+	pumpBoth(t, a, b, "a terminal on the window", func() bool { return oneShell(b) })
+	if got := b.machines.Name(b.st.Panes[0].Machine); got != link.Shown() {
+		t.Fatalf("the window is called %q, want %q", got, link.Shown())
+	}
+	pumpBoth(t, a, b, "the first window to see it", func() bool { return len(a.st.Serving.Clients) == 1 })
+	if from := a.st.Serving.Clients[0].From; !strings.Contains(from, "through ") {
+		t.Fatalf("the client came from %q", from)
+	}
+
+	// Typed again, it is the same window, not a second heading.
+	if got := b.windowAt(serveAddr(link.String())); got != b.st.Panes[0].Machine {
+		t.Fatalf("the link is known as %q, want %q", got, b.st.Panes[0].Machine)
 	}
 }

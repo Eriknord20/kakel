@@ -34,6 +34,7 @@ import (
 	"github.com/marrasen/gunim/widget"
 
 	"github.com/marrasen/kakel/meter"
+	"github.com/marrasen/kakel/relay"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/secrets"
 	"github.com/marrasen/kakel/settings"
@@ -1455,13 +1456,13 @@ func (w *Window) savingClashes(h remote.Host, old *remote.Host) string {
 	if h.Window {
 		for _, s := range w.saved {
 			if s.Window && (was == "" || s.ID != was) && s.ServeAddr() == h.ServeAddr() {
-				return fmt.Sprintf("%s is already saved as the window at %s; a window has one entry in the list.", s.Name, h.ServeAddr())
+				return fmt.Sprintf("%s is already saved as the window at %s; a window has one entry in the list.", s.Name, relay.Shown(h.ServeAddr()))
 			}
 		}
 	}
 	for _, rw := range w.remoteWindows {
 		if was != "" && rw.Name == machines.ID(was) && (!h.Window || rw.Addr != h.ServeAddr()) {
-			return fmt.Sprintf("%s is connected at %s; let go of it before changing where it is.", old.Name, rw.Addr)
+			return fmt.Sprintf("%s is connected at %s; let go of it before changing where it is.", old.Name, relay.Shown(rw.Addr))
 		}
 	}
 	return ""
@@ -1471,6 +1472,10 @@ func (w *Window) savingClashes(h remote.Host, old *remote.Host) string {
 func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 	name, addr, port, user, key := widget.NewTextField(), widget.NewTextField(), widget.NewTextField(), widget.NewTextField(), widget.NewTextField()
 	addr.Placeholder, port.Placeholder = "host name or address", "22"
+	// The code of a window served through a relay, whose address is
+	// then the relay's URL.
+	code := widget.NewTextField()
+	code.Placeholder = "XXXX-XXXX, for a window through a relay"
 	user.Placeholder, key.Placeholder = "your name here", "the usual keys in ~/.ssh"
 	// Through lists the other saved servers, to reach this one through.
 	// A kakel window is no jump host: it opens no SSH way on.
@@ -1518,6 +1523,7 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 		if old.Window {
 			kind.SetSelected(1, nil)
 		}
+		code.SetText(old.Code, nil)
 		setup.SetChecked(old.Setup, nil)
 		forward.SetChecked(old.ForwardAgent, nil)
 		for i, id := range ids {
@@ -1556,6 +1562,17 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 		}
 		h.Via = ids[max(0, min(via.Selected(), len(ids)-1))]
 		h.Window = kind.Selected() == 1
+		h.Code = ""
+		if c := strings.TrimSpace(code.Text()); h.Window && c != "" {
+			parsed, err := relay.ParseCode(c)
+			if err != nil {
+				return h, words.UpperFirst(err.Error()) + "."
+			}
+			h.Code, h.Port = parsed, 0
+			if u, err := relay.ParseURL(h.Address); err == nil {
+				h.Address = u.String()
+			}
+		}
 		if old != nil {
 			// Folders saved before favourites stay until they are moved.
 			h.Folders = old.Folders
@@ -1583,10 +1600,26 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 		window := kind.Selected() == 1
 		via.Disabled = window || len(ids) <= 1
 		forward.Disabled = window
+		code.Disabled = !window
+		addr.Placeholder = "host name or address"
+		if window {
+			addr.Placeholder = "host name or address, or a relay's URL"
+		}
 	}
 	applies()
 	kind.OnChange = func(int, *gunim.UI) gunim.Intent { applies(); return nil }
-	form := widget.NewForm().Add("Name", name).Add("Type", kind).Add("Address", addr).Add("Port", port).Add("User", user).
+	// A link pasted whole, the relay and the code, is split into the two.
+	addr.OnChange = func(text string, u *gunim.UI) gunim.Intent {
+		if l, err := relay.ParseLink(text); err == nil {
+			addr.SetText(l.Relay.String(), u)
+			code.SetText(l.Code, u)
+			kind.SetSelected(1, u)
+			applies()
+			u.Invalidate()
+		}
+		return nil
+	}
+	form := widget.NewForm().Add("Name", name).Add("Type", kind).Add("Address", addr).Add("Code", code).Add("Port", port).Add("User", user).
 		Add("Through", via).Add("Key file", key)
 	if kept != nil {
 		form.Add("Saved keys", kept)

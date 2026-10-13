@@ -193,6 +193,13 @@ another; the old one lets nobody else in. Untick "On a port of this
 machine" to serve through the relay alone. The keys that may connect
 are the same either way.
 
+At the other end, "Connect to Window…" with "Through a relay" takes the
+relay's URL and the code; pasting the copied link into either field
+fills in both. The relay used last is offered again. A window saved in
+the server list as a kakel window takes the relay's URL as its address
+and the code in Code. The host key is checked as for any window, under
+the code and the relay's name: a new code is a new window to trust.
+
 ## Running a relay
 
 A relay joins two kakel windows that cannot reach each other: both

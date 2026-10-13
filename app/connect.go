@@ -589,8 +589,12 @@ func loginHost(hostPort string) string {
 
 // TrustHostKey implements [remote.Ask].
 func (q asker) TrustHostKey(ctx context.Context, k remote.HostKey) (bool, error) {
+	who := k.Addr
+	if k.Shown != "" {
+		who = k.Shown
+	}
 	text := fmt.Sprintf("%s is new to this computer. Its %s key has the fingerprint %s. Connect only if that matches the one its owner gave you.",
-		k.Addr, k.Type(), k.Fingerprint())
+		who, k.Type(), k.Fingerprint())
 	// Careful: it opens on Cancel, as the one question where yes by
 	// reflex is the answer that cannot be taken back.
 	ans, err := q.a.ask(ctx, Ask{Title: "Trust this server?", Text: text, Yes: "Trust and Connect", Careful: true, Icon: "shield-alert"})

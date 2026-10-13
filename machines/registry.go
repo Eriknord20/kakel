@@ -2,6 +2,7 @@ package machines
 
 import (
 	"context"
+	"github.com/marrasen/kakel/relay"
 	"maps"
 	"slices"
 	"strings"
@@ -169,7 +170,9 @@ func (r *Registry) Name(id ID) string {
 	case id == Local:
 		return "this computer"
 	case r.quick[id].target != "":
-		return r.quick[id].target
+		// A window through a relay by its code, and not the relay's
+		// secret.
+		return relay.Shown(r.quick[id].target)
 	}
 	if b := r.book(); b != nil {
 		if name, ok := b.NameOf(string(id)); ok {

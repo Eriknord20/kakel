@@ -179,7 +179,7 @@ func (w *Window) cardFor(m machines.ID, name string) cardInfo {
 		}
 		c.sub = hostWho(h)
 		if h.Window {
-			c.sub = "kakel window · " + h.ServeAddr()
+			c.sub = "kakel window · " + h.Target()
 		}
 		if h.Via != "" {
 			c.sub += " · via " + w.nameOf(machines.ID(h.Via))

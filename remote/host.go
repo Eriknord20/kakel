@@ -2,6 +2,7 @@ package remote
 
 import (
 	"fmt"
+	"github.com/marrasen/kakel/relay"
 	"net"
 	"slices"
 	"strconv"
@@ -77,16 +78,32 @@ type Host struct {
 	// than logged in to.
 	//
 	// Address and Port are where it serves, and the first of Identities
-	// is the key to offer it. User, Via and Term mean nothing to one:
-	// there is no account to log in to and no machine to go through.
+	// is the key to offer it. User and Term mean nothing to one: there
+	// is no account to log in to. Via is the saved server the window,
+	// or its relay, is reached through.
 	Window bool `json:"window,omitempty"`
+
+	// Code is the code of a window served through a relay, which is
+	// reached by the relay and the code rather than an address and a
+	// port: Address is then the relay's URL, with its secret.
+	Code string `json:"code,omitempty"`
 }
 
 // ServePort is the port a kakel serves on when none is given.
 const ServePort = 2222
 
-// ServeAddr returns where a saved window serves, as host:port.
+// ServeAddr returns where a saved window serves, as host:port, or as
+// the relay's URL with the code after a # for one served through a
+// relay.
 func (h Host) ServeAddr() string {
+	if h.Code != "" {
+		if u, err := relay.ParseURL(h.Address); err == nil {
+			if code, err := relay.ParseCode(h.Code); err == nil {
+				return relay.Link{Relay: u, Code: code}.String()
+			}
+		}
+		return h.Address + "#" + h.Code
+	}
 	port := h.Port
 	if port == 0 {
 		port = ServePort
@@ -107,7 +124,8 @@ func (h Host) KeyFile() string {
 // leaving out the parts that are the default.
 func (h Host) Target() string {
 	if h.Window {
-		return h.ServeAddr()
+		// The relay without its secret, for one served through a relay.
+		return relay.Shown(h.ServeAddr())
 	}
 	addr := h.Address
 	if h.Port != 0 && h.Port != 22 {
@@ -200,8 +218,18 @@ func (h Host) Validate() error {
 		return fmt.Errorf("the user name contains a character that is not allowed")
 	case h.Via != "" && (h.Via == h.ID || strings.EqualFold(h.Via, h.Name)):
 		return fmt.Errorf("%q cannot be reached through itself", h.Name)
+	case h.Code != "" && !h.Window:
+		return fmt.Errorf("only a kakel window is reached by a code")
 	case CommandName(h.Name) == "":
 		return fmt.Errorf("the name has to have something in it a command can be named after")
+	}
+	if h.Code != "" {
+		if _, err := relay.ParseURL(h.Address); err != nil {
+			return err
+		}
+		if _, err := relay.ParseCode(h.Code); err != nil {
+			return err
+		}
 	}
 	for _, path := range h.Identities {
 		if path == "" {

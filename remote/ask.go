@@ -108,6 +108,10 @@ type HostKey struct {
 	// Addr is the host:port being connected to.
 	Addr string
 
+	// Shown is what to call the machine when Addr is not it, as for a
+	// window reached through a relay; empty when Addr is.
+	Shown string
+
 	// Key is what the server presented.
 	Key ssh.PublicKey
 }
