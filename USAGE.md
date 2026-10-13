@@ -217,6 +217,10 @@ or `Ctrl+R` lists the folder again, even with the keyboard elsewhere
 in the window.
 `Ctrl+F` filters the folder, `Ctrl+P` finds a file, `Ctrl+1` and
 `Ctrl+2` switch between details and icons, and `Space` views a file.
+The button beside the filter, or Go › Filter subfolders too, has the
+filter look in every folder under this one; a Folder column then says
+where each item sits, and Go to its folder on an item's menu goes
+there.
 `Ctrl+W` closes the pane. Keys with `Ctrl+Shift` stay kakel's, as
 `Ctrl+Shift+D` to split and `Ctrl+Shift+C` to copy, except
 `Ctrl+Shift+N`, a new folder. Copy path is on a file's menu.
