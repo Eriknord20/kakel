@@ -7,6 +7,14 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## v0.12.1-beta.1
+
+### Fixed
+
+**The pin button is drawn properly on screens with a colour profile.**
+On such screens, the pin before the minimize button showed as diagonal
+streaks. Other icons and text could be sheared the same way.
+
 ## v0.12.0
 
 Everything from the 23 betas, v0.12.0-beta.1 to v0.12.0-beta.23, for
