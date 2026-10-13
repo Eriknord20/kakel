@@ -73,8 +73,18 @@ type Window struct {
 
 // DialConfig is what reaching another window takes.
 type DialConfig struct {
-	// Addr is the machine and port it is serving on.
+	// Addr is the machine and port it is serving on, which its host
+	// key is checked under.
 	Addr string
+
+	// Reach makes the connection the window is reached over, in place
+	// of a TCP connection to Addr: a stream through a relay, or through
+	// a jump server. A nil one dials Addr from this machine.
+	Reach func(ctx context.Context) (net.Conn, error)
+
+	// Shown is what to call the window in what is said, when Addr is
+	// not it, as for a window reached through a relay.
+	Shown string
 
 	// Keys are the keys to offer, all in one attempt. The other window
 	// has to have one of them listed: there is no other way in, and
@@ -128,13 +138,23 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 		return nil, errors.New("serve: nothing to check the machine by")
 	}
 
-	cfg.say("reaching " + cfg.Addr)
-	d := net.Dialer{Timeout: dialTimeout}
-	nc, err := d.DialContext(ctx, "tcp", cfg.Addr)
-	if err != nil {
-		return nil, fmt.Errorf("serve: reach %s: %w", cfg.Addr, err)
+	shown := cfg.Addr
+	if cfg.Shown != "" {
+		shown = cfg.Shown
 	}
-	cfg.say("asking " + cfg.Addr + " who it is")
+	cfg.say("reaching " + shown)
+	reach := cfg.Reach
+	if reach == nil {
+		reach = func(ctx context.Context) (net.Conn, error) {
+			d := net.Dialer{Timeout: dialTimeout}
+			return d.DialContext(ctx, "tcp", cfg.Addr)
+		}
+	}
+	nc, err := reach(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("serve: reach %s: %w", shown, err)
+	}
+	cfg.say("asking " + shown + " who it is")
 	// Closing the connection is what unblocks the handshake, whichever
 	// part of it is waiting.
 	stop := context.AfterFunc(ctx, func() { _ = nc.Close() })
@@ -152,7 +172,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 	if err := nc.SetDeadline(time.Now().Add(patience)); err != nil {
 		stop()
 		_ = nc.Close()
-		return nil, fmt.Errorf("serve: reach %s: %w", cfg.Addr, err)
+		return nil, fmt.Errorf("serve: reach %s: %w", shown, err)
 	}
 
 	var (
@@ -175,7 +195,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 			// The far end has answered, so what is left is signing in,
 			// which is allowed to wait on the user.
 			if err := nc.SetDeadline(time.Time{}); err != nil {
-				return fmt.Errorf("serve: reach %s: %w", cfg.Addr, err)
+				return fmt.Errorf("serve: reach %s: %w", shown, err)
 			}
 			cfg.say("it answered, with a " + key.Type() + " host key")
 			if err := cfg.HostKey(hostname, addr, key); err != nil {
@@ -207,7 +227,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 			return nil, errors.Join(ctx.Err(), err)
 		}
 		_ = nc.Close()
-		return nil, fmt.Errorf("serve: reach %s: %w", cfg.Addr, err)
+		return nil, fmt.Errorf("serve: reach %s: %w", shown, err)
 	}
 	if !stop() {
 		// Given up on between the handshake finishing and us noticing.
@@ -219,9 +239,9 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 	// Belt and braces: a session left with a deadline dies at it.
 	if err := nc.SetDeadline(time.Time{}); err != nil {
 		_ = cc.Close()
-		return nil, fmt.Errorf("serve: reach %s: %w", cfg.Addr, err)
+		return nil, fmt.Errorf("serve: reach %s: %w", shown, err)
 	}
-	w := &Window{client: ssh.NewClient(cc, chans, reqs), addr: cfg.Addr,
+	w := &Window{client: ssh.NewClient(cc, chans, reqs), addr: shown,
 		watched: make(chan struct{})}
 	w.watch()
 	return w, nil

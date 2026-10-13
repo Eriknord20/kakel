@@ -181,6 +181,18 @@ machine's, and Remove Key… takes one off and hangs up on the window it
 let in. If you made that file a link to `~/.ssh/authorized_keys`, the
 keys added here may log in over ssh too.
 
+### Through a relay
+
+When the other machine cannot reach this one, serve through a relay
+(see below). Tick "Through a relay" in the Serve dialog and paste the
+relay's URL. Kakel makes a code, such as `7KQ2-M9XD`, and keeps it, so
+it is the same every time this window is served. The other end types
+that code. Copy Link puts the relay's URL and the code on the
+clipboard, for pasting at the other end in one go. New Code makes
+another; the old one lets nobody else in. Untick "On a port of this
+machine" to serve through the relay alone. The keys that may connect
+are the same either way.
+
 ## Running a relay
 
 A relay joins two kakel windows that cannot reach each other: both

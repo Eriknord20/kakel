@@ -74,7 +74,9 @@ func Main(ctx context.Context, args []string, dir string, out io.Writer) error {
 	s := NewServer(secret)
 	s.Log = logger.Printf
 
-	srv := &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second,
+	// IdleTimeout too: a caller turned away could otherwise hold its
+	// connection open, saying nothing, for as long as it liked.
+	srv := &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: time.Minute,
 		ErrorLog: log.New(io.Discard, "", 0)}
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -92,7 +94,8 @@ func Main(ctx context.Context, args []string, dir string, out io.Writer) error {
 		}
 		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate, NextProtos: []string{"http/1.1", "acme-tls/1"}, MinVersion: tls.VersionTLS12}
 		ln = tls.NewListener(ln, srv.TLSConfig)
-		challenge := &http.Server{Addr: *httpAt, Handler: m.HTTPHandler(nil), ReadHeaderTimeout: 10 * time.Second}
+		challenge := &http.Server{Addr: *httpAt, Handler: m.HTTPHandler(nil), ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout: time.Minute}
 		go func() {
 			if err := challenge.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Printf("kakel relay: Let's Encrypt cannot check the domain on %s: %v", *httpAt, err)
@@ -112,8 +115,9 @@ func Main(ctx context.Context, args []string, dir string, out io.Writer) error {
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// Neither closes the WebSockets handed over; the process ending
+	// does, which is what comes next.
 	_ = srv.Shutdown(sctx)
-	// Shutdown does not wait for the WebSockets it has handed over.
 	_ = srv.Close()
 	return nil
 }

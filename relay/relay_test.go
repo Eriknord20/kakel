@@ -371,3 +371,86 @@ func (s *syncBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.b.String()
 }
+
+func TestAProxyOnThisMachineIsBelievedOnlyForWhatItAdded(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "127.0.0.1:5555"
+	r.Header.Set("X-Forwarded-For", "10.0.0.5, 203.0.113.9")
+	if got := clientAddr(r); got != "203.0.113.9" {
+		t.Errorf("behind a proxy here: %q", got)
+	}
+	r.RemoteAddr = "198.51.100.7:5555"
+	if got := clientAddr(r); got != "198.51.100.7" {
+		t.Errorf("from afar, with the header: %q", got)
+	}
+}
+
+func TestAProxyThatDropsTheUpgradeIsSaidSo(t *testing.T) {
+	_, u := started(t)
+	resp, err := http.Get(u.to(doorJoin + "/AAAA-BBBB"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusUpgradeRequired || !strings.Contains(string(b), "Upgrade and Connection") {
+		t.Fatalf("%s: %s", resp.Status, b)
+	}
+}
+
+func TestGuessingCodesIsSlowedDown(t *testing.T) {
+	_, u := started(t)
+	var err error
+	for i := 0; i <= mostMisses; i++ {
+		_, err = Join(context.Background(), Link{Relay: u, Code: NewCode()}, Dialer{})
+	}
+	if err == nil || !strings.Contains(err.Error(), "wait a minute") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestOneAddressCannotTakeEveryPlace(t *testing.T) {
+	s := NewServer(NewSecret())
+	for range mostHostsFrom {
+		s.hosts[NewCode()] = &host{from: "192.0.2.1"}
+	}
+	if why, _ := s.mayRegister(NewCode(), NewToken(), "192.0.2.1"); why == "" {
+		t.Error("one more from the same address was let in")
+	}
+	if why, _ := s.mayRegister(NewCode(), NewToken(), "192.0.2.2"); why != "" {
+		t.Errorf("another address was turned away: %s", why)
+	}
+}
+
+func TestANewCodeIsTakenAtOnce(t *testing.T) {
+	_, u := started(t)
+	code := NewCode()
+	l, st := hosted(t, u, code, NewToken())
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	fresh := NewCode()
+	if err := l.SetCode(fresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.next(t); err != nil {
+		t.Fatalf("registering under the new code: %v", err)
+	}
+	if l.Code() != fresh {
+		t.Fatalf("the code is %s", l.Code())
+	}
+	c, err := Join(context.Background(), Link{Relay: u, Code: fresh}, Dialer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Close()
+	if _, err := Join(context.Background(), Link{Relay: u, Code: code}, Dialer{}); err == nil {
+		t.Fatal("the old code still let a window through")
+	}
+}

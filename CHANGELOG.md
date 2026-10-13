@@ -17,6 +17,12 @@ connecting to it, over WebSockets on HTTPS. It gets a certificate from
 Let's Encrypt with `-domain`, or runs on plain HTTP behind nginx or
 Caddy. Its URL holds a secret, and it answers nothing without it.
 
+**Serve a window through a relay.** The Serve dialog can serve through
+a relay as well as on a port, or instead. Kakel makes a code to type at
+the other end and keeps it from one run to the next. Copy Link and New
+Code are in the served dialog, which says whether the relay is reached.
+Kakel reaches the relay again by itself when the network comes back.
+
 ## v0.12.1-beta.1
 
 ### Fixed

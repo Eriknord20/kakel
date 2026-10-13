@@ -58,6 +58,10 @@ type Config struct {
 	// up reachable from the network.
 	Addr string
 
+	// Listeners are more places to take connections from, as a relay
+	// hands them over. Addr may be empty when there is one.
+	Listeners []net.Listener
+
 	// HostKey is what a client checks this machine by.
 	HostKey ssh.Signer
 
@@ -222,7 +226,10 @@ func (c *Client) Close() error {
 // nobody allowed to connect.
 type Server struct {
 	cfg Config
+	// ln is the port listened on, nil when there is none, and lns are
+	// every place connections come from, the port among them.
 	ln  net.Listener
+	lns []net.Listener
 	// allowed are the keys that may connect now: cfg's, until
 	// SetAllowed changes them.
 	allowed atomic.Pointer[Allowed]
@@ -261,23 +268,30 @@ func Listen(cfg Config) (*Server, error) {
 	case cfg.Allowed.Len() == 0:
 		return nil, errors.New(
 			"serve: no keys are allowed to connect, so there is nobody to serve")
-	case cfg.Addr == "":
+	case cfg.Addr == "" && len(cfg.Listeners) == 0:
 		return nil, errors.New("serve: no address to listen on")
 	}
 
 	s := &Server{cfg: cfg, arriving: map[net.Conn]struct{}{}}
 	s.allowed.Store(cfg.Allowed)
-	ln, err := net.Listen("tcp", cfg.Addr)
-	if err != nil {
-		return nil, fmt.Errorf("serve: listen on %s: %w", cfg.Addr, err)
+	if cfg.Addr != "" {
+		ln, err := net.Listen("tcp", cfg.Addr)
+		if err != nil {
+			return nil, fmt.Errorf("serve: listen on %s: %w", cfg.Addr, err)
+		}
+		s.ln = ln
+		s.lns = append(s.lns, ln)
 	}
-	s.ln = ln
-	go s.accept()
+	s.lns = append(s.lns, cfg.Listeners...)
+	for _, ln := range s.lns {
+		go s.accept(ln)
+	}
 	return s, nil
 }
 
 // Addr is where the server is listening, which is not always what it
-// was asked for: a port of 0 is whichever one the system gave it.
+// was asked for: a port of 0 is whichever one the system gave it. It is
+// empty when the server takes connections from Listeners alone.
 func (s *Server) Addr() string {
 	if s == nil || s.ln == nil {
 		return ""
@@ -329,7 +343,10 @@ func (s *Server) Close() error {
 	clear(s.arriving)
 	s.mu.Unlock()
 
-	err := s.ln.Close()
+	var err error
+	for _, ln := range s.lns {
+		err = errors.Join(err, ln.Close())
+	}
 	for _, c := range clients {
 		if got := c.Close(); got != nil {
 			err = errors.Join(err, got)
@@ -345,9 +362,9 @@ func (s *Server) Close() error {
 }
 
 // accept takes connections until the listener is closed.
-func (s *Server) accept() {
+func (s *Server) accept(ln net.Listener) {
 	for {
-		nc, err := s.ln.Accept()
+		nc, err := ln.Accept()
 		if err == nil {
 			go s.handshake(nc)
 			continue
@@ -360,7 +377,7 @@ func (s *Server) accept() {
 		// carrying on looking like a window that can still be reached.
 		_ = s.Close()
 		if s.cfg.OnStopped != nil {
-			s.cfg.OnStopped(fmt.Errorf("serve: stopped listening on %s: %w", s.Addr(), err))
+			s.cfg.OnStopped(fmt.Errorf("serve: stopped listening on %s: %w", ln.Addr(), err))
 		}
 		return
 	}

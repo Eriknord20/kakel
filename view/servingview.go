@@ -12,6 +12,7 @@ import (
 	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/widget"
 
+	"github.com/marrasen/kakel/relay"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/words"
 )
@@ -25,6 +26,8 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	}
 	form := widget.NewForm().Add("", widget.NewLabel("A connected window can open shells here, use the ones running, and read and write files as you."))
 	addAllowed(form, s)
+	onPort := widget.NewCheckbox("On a port of this machine")
+	onPort.SetChecked(!s.NoPort, nil)
 	port := widget.NewTextField()
 	port.SetText(strconv.Itoa(s.Port), nil)
 	port.Placeholder = "0 picks a free port"
@@ -33,9 +36,23 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	if s.Anywhere {
 		where.SetSelected(1, nil)
 	}
+	onRelay := widget.NewCheckbox("Through a relay")
+	onRelay.SetChecked(s.RelayOn, nil)
+	relayURL := widget.NewTextField()
+	relayURL.SetText(s.RelayURL, nil)
+	relayURL.Placeholder = "https://relay.example.com/k/…"
+	enable := func() {
+		port.Disabled, where.Disabled = !onPort.Checked(), !onPort.Checked()
+		relayURL.Disabled = !onRelay.Checked()
+	}
+	enable()
+	onPort.OnChange = func(bool, *gunim.UI) gunim.Intent { enable(); return nil }
+	onRelay.OnChange = func(bool, *gunim.UI) gunim.Intent { enable(); return nil }
 	// Said beside the field, as the field opens with a port in it and
 	// a placeholder would never show.
-	form.Add("Port", port).Add("", widget.NewLabel("0 picks a free port.")).Add("Listen on", where)
+	form.Add("", onPort).Add("Port", port).Add("", widget.NewLabel("0 picks a free port.")).Add("Listen on", where)
+	form.Add("", onRelay).Add("Relay", relayURL).
+		Add("", widget.NewLabel(relayCodeSays(s)))
 	d := widget.NewDialog("Serve This Window")
 	d.Body = form
 	d.SetButtons("Serve", "Cancel")
@@ -43,10 +60,19 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	d.Check = func() string {
 		n, err := strconv.Atoi(strings.TrimSpace(port.Text()))
 		switch {
-		case err != nil || n < 0 || n > 65535:
+		case !onPort.Checked() && !onRelay.Checked():
+			return "Serve on a port, through a relay, or both."
+		case onPort.Checked() && (err != nil || n < 0 || n > 65535):
 			return "The port is a number from 0 to 65535."
+		case onRelay.Checked() && strings.TrimSpace(relayURL.Text()) == "":
+			return "Paste the relay's URL, as kakel -relay printed it."
 		case len(s.Allowed) == 0:
 			return "Add a key that may connect first."
+		}
+		if onRelay.Checked() {
+			if _, err := relay.ParseURL(relayURL.Text()); err != nil {
+				return words.UpperFirst(err.Error()) + "."
+			}
 		}
 		return ""
 	}
@@ -54,17 +80,45 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 		// Shown once it is served: the host key, to check from the
 		// other end. Nothing, if serving did not start.
 		w.servingAsked, w.servingTries = true, s.Tries
-		return app.StartServing{Port: port.Text(), Anywhere: where.Selected() == 1}
+		return app.StartServing{Port: port.Text(), Anywhere: where.Selected() == 1,
+			NoPort: !onPort.Checked(), Relay: onRelay.Checked(), RelayURL: relayURL.Text()}
 	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
 }
 
+// relayCodeSays is what the Serve dialog says of the code the window
+// is served under on a relay.
+func relayCodeSays(s app.Serving) string {
+	if s.Code == "" {
+		return "Kakel makes a code for the other end to type, and keeps it."
+	}
+	return "The other end types the code " + s.Code + ". It stays the same each time."
+}
+
+// relaySays is how serving through the relay is going.
+func relaySays(s app.Serving) string {
+	switch {
+	case s.Reached:
+		return "Reached. Windows connect with the code."
+	case s.RelayTrouble != "":
+		return "Not reached: " + s.RelayTrouble + ". Trying again."
+	}
+	return "Reaching the relay…"
+}
+
 // servedDialog says where the window is served and who is connected.
 func (w *Window) servedDialog(s app.Serving, u *gunim.UI) {
-	form := widget.NewForm().
-		Add("Address", widget.NewLabel(s.Addr)).
-		Add("Host key", widget.NewLabel(s.Fingerprint))
+	form := widget.NewForm()
+	if s.Addr != "" {
+		form.Add("Address", widget.NewLabel(s.Addr))
+	}
+	var code, state *widget.Label
+	if s.Relayed {
+		code, state = widget.NewLabel(s.Code), widget.NewLabel(relaySays(s))
+		form.Add("Relay", widget.NewLabel(s.RelayHost)).Add("Code", code).Add("", state)
+	}
+	form.Add("Host key", widget.NewLabel(s.Fingerprint))
 	who := widget.NewLabel(connectedSays(s))
 	form.Add("Connected", who)
 	addAllowed(form, s)
@@ -72,10 +126,14 @@ func (w *Window) servedDialog(s app.Serving, u *gunim.UI) {
 	d.Body = form
 	d.SetButtons("Done", "")
 	w.keyActions(d, s)
+	if s.Relayed {
+		d.AddAction("Copy Link", func(u *gunim.UI) gunim.Intent { return app.CopyRelayLink{} })
+		d.AddAction("New Code", func(u *gunim.UI) gunim.Intent { return app.NewRelayCode{} })
+	}
 	d.AddButton("Disconnect All", func(u *gunim.UI) gunim.Intent { return app.DisconnectClients{} })
 	d.AddButton("Stop Serving", func(u *gunim.UI) gunim.Intent { return app.StopServing{} })
 	d.OnAccept, d.OnDismiss = widget.Sends(app.DialogClosed{}), widget.Sends(app.DialogClosed{})
-	w.served = &servedShown{d: d, who: who}
+	w.served = &servedShown{d: d, who: who, code: code, state: state}
 	w.openDialog(d, u)
 }
 
@@ -205,6 +263,9 @@ func connectedSays(s app.Serving) string {
 type servedShown struct {
 	d   *widget.Dialog
 	who *widget.Label
+	// code and state are the code on the relay and how reaching it is
+	// going, nil when the window is not served through one.
+	code, state *widget.Label
 }
 
 // showServed keeps the dialog saying the window is served up to date
@@ -220,6 +281,9 @@ func (w *Window) showServed(s app.Serving, u *gunim.UI) {
 			sh.d.Close(u)
 		default:
 			sh.who.Text = connectedSays(s)
+			if sh.code != nil {
+				sh.code.Text, sh.state.Text = s.Code, relaySays(s)
+			}
 			u.Invalidate()
 		}
 	}

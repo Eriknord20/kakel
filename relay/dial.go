@@ -79,12 +79,11 @@ func Join(ctx context.Context, link Link, d Dialer) (net.Conn, error) {
 	return stream(ws, linkAddr(link.Shown())), nil
 }
 
-// stream is a WebSocket as a connection, pinged while it is open, so a
-// relay that has gone is noticed and a proxy sees it in use.
+// stream is a WebSocket as a connection, pinged while it is quiet, so
+// a relay that has gone is noticed and a proxy sees it in use.
 func stream(ws *websocket.Conn, far net.Addr) net.Conn {
 	ctx, cancel := context.WithCancel(context.Background())
-	go keepUp(ctx, ws)
-	return &wsConn{Conn: websocket.NetConn(ctx, ws, websocket.MessageBinary), cancel: cancel, far: far}
+	return &wsConn{Conn: carried(ctx, ws), cancel: cancel, far: far}
 }
 
 // wsConn is a stream through a relay.
@@ -119,8 +118,8 @@ func NewToken() string {
 // HostConfig is what serving through a relay needs.
 type HostConfig struct {
 	Relay URL
-	// Code is what a window connecting gives, and Token is what tells
-	// the relay this is the window the code is kept for.
+	// Code is what a window connecting gives, until SetCode, and Token
+	// is what tells the relay this is the window the code is kept for.
 	Code, Token string
 	Dialer      Dialer
 	// OnState is told each time the window's place on the relay
@@ -143,6 +142,14 @@ type Listener struct {
 	cancel context.CancelFunc
 	conns  chan net.Conn
 	once   sync.Once
+
+	// mu guards code, and current, the registration held now, which
+	// SetCode ends so the next one is made under the new code.
+	mu      sync.Mutex
+	code    string
+	current context.CancelFunc
+	// bringing holds a place for each stream being brought.
+	bringing chan struct{}
 	// waits are tryAgainAfter as it was when it started.
 	waits []time.Duration
 }
@@ -163,7 +170,7 @@ func Listen(cfg HostConfig) (*Listener, error) {
 	cfg.Code = code
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &Listener{cfg: cfg, ctx: ctx, cancel: cancel, conns: make(chan net.Conn),
-		waits: tryAgainAfter}
+		waits: tryAgainAfter, code: code, bringing: make(chan struct{}, mostWaiting)}
 	go l.stay()
 	return l, nil
 }
@@ -187,7 +194,34 @@ func (l *Listener) Close() error {
 
 // Addr is the window's link.
 func (l *Listener) Addr() net.Addr {
-	return linkAddr(Link{Relay: l.cfg.Relay, Code: l.cfg.Code}.String())
+	return linkAddr(Link{Relay: l.cfg.Relay, Code: l.Code()}.String())
+}
+
+// Relay is the relay the window is served through.
+func (l *Listener) Relay() URL { return l.cfg.Relay }
+
+// Code is the code the window is served under.
+func (l *Listener) Code() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.code
+}
+
+// SetCode serves the window under another code from now on. The
+// windows connected under the old one stay connected; a window
+// connecting under it is no longer let through.
+func (l *Listener) SetCode(code string) error {
+	code, err := ParseCode(code)
+	if err != nil {
+		return err
+	}
+	l.mu.Lock()
+	l.code = code
+	if l.current != nil {
+		l.current()
+	}
+	l.mu.Unlock()
+	return nil
 }
 
 // state tells OnState, when there is one.
@@ -206,6 +240,11 @@ func (l *Listener) stay() {
 		err := l.registered()
 		if l.ctx.Err() != nil {
 			return
+		}
+		if errors.Is(err, errNewCode) {
+			// Registered again at once, under the new code.
+			tries = 0
+			continue
 		}
 		// One that held for a while had the relay; losing it is a fresh
 		// start, not one more failure in a row.
@@ -226,17 +265,24 @@ func (l *Listener) stay() {
 // registered registers once, and hears of windows connecting until the
 // relay is lost, returning why.
 func (l *Listener) registered() error {
+	ctx, cancel := context.WithCancel(l.ctx)
+	defer cancel()
+	l.mu.Lock()
+	code := l.code
+	l.current = cancel
+	l.mu.Unlock()
 	header := http.Header{tokenHeader: {l.cfg.Token}}
-	q := url.Values{"code": {l.cfg.Code}}
-	ws, err := l.cfg.Dialer.open(l.ctx, l.cfg.Relay.to(doorHost)+"?"+q.Encode(), header)
+	q := url.Values{"code": {code}}
+	ws, err := l.cfg.Dialer.open(ctx, l.cfg.Relay.to(doorHost)+"?"+q.Encode(), header)
 	if err != nil {
+		if l.moved(code) {
+			return errNewCode
+		}
 		return reachErr(l.cfg.Relay, err)
 	}
 	defer func() { _ = ws.CloseNow() }()
 	ws.SetReadLimit(4 << 10)
-	ctx, cancel := context.WithCancel(l.ctx)
-	defer cancel()
-	go keepUp(ctx, ws)
+	go keepUp(ctx, ws, nil)
 	l.state(nil)
 	for {
 		kind, line, err := ws.Read(ctx)
@@ -244,21 +290,39 @@ func (l *Listener) registered() error {
 			if l.ctx.Err() != nil {
 				return nil
 			}
+			if l.moved(code) {
+				return errNewCode
+			}
 			if why := websocket.CloseStatus(err); why != -1 {
 				var ce websocket.CloseError
 				if errors.As(err, &ce) && ce.Reason != "" {
 					return reachErr(l.cfg.Relay, errors.New(ce.Reason))
 				}
 			}
-			return reachErr(l.cfg.Relay, fmt.Errorf("lost: %w", err))
+			return reachErr(l.cfg.Relay, errors.New("the connection to it was lost"))
 		}
 		var k knock
 		if kind != websocket.MessageText || json.Unmarshal(line, &k) != nil || k.Ticket == "" {
 			continue
 		}
-		go l.bring(k)
+		// As many at once as the relay lets wait, and no more: past
+		// that the relay is not one this window should trust.
+		select {
+		case l.bringing <- struct{}{}:
+			go func() {
+				defer func() { <-l.bringing }()
+				l.bring(k)
+			}()
+		default:
+		}
 	}
 }
+
+// errNewCode ends a registration under a code given up for another.
+var errNewCode = errors.New("relay: the code changed")
+
+// moved reports whether the window is no longer served under code.
+func (l *Listener) moved(code string) bool { return l.Code() != code }
 
 // bring brings the stream for one window connecting, and hands it to
 // Accept.

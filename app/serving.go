@@ -21,6 +21,7 @@ import (
 	"github.com/marrasen/kakel/internal/winattrs"
 	"github.com/marrasen/kakel/machines"
 	"github.com/marrasen/kakel/meter"
+	"github.com/marrasen/kakel/relay"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/screen"
 	"github.com/marrasen/kakel/serve"
@@ -53,6 +54,22 @@ type Serving struct {
 	Port     int
 	Anywhere bool
 	AtStart  string
+	// Relay is how serving goes through a relay: RelayOn says it does,
+	// NoPort that it listens on no port of its own, RelayURL is the
+	// relay with its secret, RelayHost the relay without it, and Code
+	// what a window connecting gives there. Link is the URL and the
+	// code together, for a window connecting to paste.
+	RelayOn   bool
+	NoPort    bool
+	RelayURL  string
+	RelayHost string
+	Code      string
+	Link      string
+	// Relayed says the window is served through the relay now; Reached
+	// that the relay has it, and RelayTrouble why not when it has not.
+	Relayed      bool
+	Reached      bool
+	RelayTrouble string
 	// Allowed are the keys that may connect, by name, from the file at
 	// AllowedAt, Keys the same keys with their fingerprints, and
 	// Problem what stops that file being read.
@@ -95,7 +112,18 @@ type (
 	StartServing struct {
 		Port     string
 		Anywhere bool
+		// NoPort listens on no port, and Relay serves through the relay
+		// at RelayURL as well, or instead.
+		NoPort   bool
+		Relay    bool
+		RelayURL string
 	}
+	// NewRelayCode gives the window a new code on the relay; the old one
+	// lets nobody else in.
+	NewRelayCode struct{}
+	// CopyRelayLink copies the relay's URL and the code, for a window
+	// connecting to paste.
+	CopyRelayLink struct{}
 	// StopServing stops, hanging up on every window connected.
 	StopServing struct{}
 	// DisconnectClients hangs up on the windows connected.
@@ -120,8 +148,16 @@ type (
 
 // serving is the program's side.
 type serving struct {
-	server  *serve.Server
-	clients []*serve.Client
+	server *serve.Server
+	// relay is the window's place on the relay, while it is served
+	// through one, and reached and trouble how that is going.
+	relay   *relay.Listener
+	reached bool
+	trouble string
+	// troubled says a failure to reach the relay has been shown since
+	// it was last reached, so the next is logged and not shown again.
+	troubled bool
+	clients  []*serve.Client
 	// carried are the tunnels each client holds through this window, as
 	// it last said.
 	carried map[*serve.Client][]serve.TunnelNote
@@ -287,11 +323,26 @@ func (a *app) applyAllowed() int {
 // startServing serves the window.
 func (a *app) startServing(in StartServing) error {
 	if a.serving.server != nil {
-		return fmt.Errorf("this window is already served on %s", a.serving.server.Addr())
+		return fmt.Errorf("this window is already served on %s", a.servedWhere())
 	}
-	port, err := strconv.Atoi(strings.TrimSpace(in.Port))
-	if err != nil || port < 0 || port > 65535 {
-		return fmt.Errorf("%q is not a port number", strings.TrimSpace(in.Port))
+	if in.NoPort && !in.Relay {
+		return errors.New("serve on a port, through a relay, or both")
+	}
+	port := 0
+	if !in.NoPort {
+		n, err := strconv.Atoi(strings.TrimSpace(in.Port))
+		if err != nil || n < 0 || n > 65535 {
+			return fmt.Errorf("%q is not a port number", strings.TrimSpace(in.Port))
+		}
+		port = n
+	}
+	var relayURL relay.URL
+	if in.Relay {
+		u, err := relay.ParseURL(in.RelayURL)
+		if err != nil {
+			return err
+		}
+		relayURL = u
 	}
 	keyAt, allowedAt, err := a.servePaths()
 	if err != nil {
@@ -312,9 +363,25 @@ func (a *app) startServing(in StartServing) error {
 	if in.Anywhere {
 		host = ""
 	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	if in.NoPort {
+		addr = ""
+	}
 	post := func(f func()) { a.events <- f }
+	var lns []net.Listener
+	var rl *relay.Listener
+	if in.Relay {
+		kept := a.keptRelay(relayURL)
+		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: kept.Code, Token: kept.Token,
+			OnState: func(err error) { post(func() { a.relayState(rl, err) }) }})
+		if err != nil {
+			return err
+		}
+		lns = append(lns, rl)
+	}
 	srv, err := serve.Listen(serve.Config{
-		Addr:       net.JoinHostPort(host, strconv.Itoa(port)),
+		Addr:       addr,
+		Listeners:  lns,
 		HostKey:    hostKey,
 		Allowed:    allowed,
 		Opens:      a.opens,
@@ -337,6 +404,7 @@ func (a *app) startServing(in StartServing) error {
 		OnStopped: func(err error) {
 			post(func() {
 				a.serving.server, a.serving.clients, a.serving.carried = nil, nil, nil
+				a.serving.relay = nil
 				a.failed("This window is no longer served", err.Error())
 				a.problem()
 				a.showServing()
@@ -347,16 +415,28 @@ func (a *app) startServing(in StartServing) error {
 		OnError: func(err error) { log.Printf("serving: %v", err) },
 	})
 	if err != nil {
+		if rl != nil {
+			_ = rl.Close()
+		}
 		return err
 	}
-	a.serving.server = srv
-	log.Printf("serving this window on %s", srv.Addr())
+	a.serving.server, a.serving.relay = srv, rl
+	a.serving.reached, a.serving.trouble, a.serving.troubled = false, "", false
+	log.Printf("serving this window on %s", a.servedWhere())
 	if a.settings != nil {
 		reach := settings.ReachHere
 		if in.Anywhere {
 			reach = settings.ReachAnywhere
 		}
-		a.keep("what is served", a.settings.PutServe(port, reach))
+		if !in.NoPort {
+			a.keep("what is served", a.settings.PutServe(port, reach))
+		}
+		r := a.settings.Relay()
+		r.On, r.NoPort = in.Relay, in.NoPort
+		if in.Relay {
+			r.URL, r.Code = relayURL.String(), rl.Code()
+		}
+		a.keep("how this window is served through a relay", a.settings.PutRelay(r))
 		a.keep("that this window is served", a.settings.PutServeOn(true))
 	}
 	a.tellServed()
@@ -371,6 +451,7 @@ func (a *app) stopServing() error {
 		return nil
 	}
 	a.serving.server, a.serving.clients, a.serving.carried = nil, nil, nil
+	a.serving.relay = nil
 	log.Print("stopped serving this window")
 	if a.settings != nil {
 		a.keep("that this window is not served", a.settings.PutServeOn(false))
@@ -498,6 +579,20 @@ func (a *app) showServing() {
 	} else {
 		s.Allowed, s.Keys = allowed.Names(), allowed.Keys()
 		s.Here = a.localKeys(allowed)
+	}
+	if a.settings != nil {
+		r := a.settings.Relay()
+		s.RelayOn, s.NoPort, s.RelayURL, s.Code = r.On, r.NoPort, r.URL, r.Code
+	}
+	if rl := a.serving.relay; rl != nil {
+		s.RelayURL, s.Code = rl.Relay().String(), rl.Code()
+		s.Relayed, s.Reached, s.RelayTrouble = true, a.serving.reached, a.serving.trouble
+	}
+	if u, err := relay.ParseURL(s.RelayURL); err == nil {
+		s.RelayHost = u.Host()
+		if s.Code != "" {
+			s.Link = relay.Link{Relay: u, Code: s.Code}.String()
+		}
 	}
 	if srv := a.serving.server; srv != nil {
 		s.On, s.Addr, s.Fingerprint = true, srv.Addr(), serve.Fingerprint(srv.HostKey())
@@ -982,7 +1077,14 @@ func (a *app) offerToServeAgain() {
 	if s.Port == 0 {
 		port = "on whichever port was free"
 	}
-	ans, err := a.ask(a.ctx, Ask{Title: "Serve this window again?", Text: "It was served when it last closed: " + port + ", listening on " + where + ".",
+	said := port + ", listening on " + where
+	switch {
+	case s.RelayOn && s.NoPort:
+		said = "through the relay " + s.RelayHost + ", as " + s.Code
+	case s.RelayOn:
+		said += ", and through the relay " + s.RelayHost + ", as " + s.Code
+	}
+	ans, err := a.ask(a.ctx, Ask{Title: "Serve this window again?", Text: "It was served when it last closed: " + said + ".",
 		Yes: "Serve", No: "Not Now", Also: "Don't ask again"})
 	if err != nil && !errors.Is(err, errDeclined) {
 		return
@@ -1004,10 +1106,112 @@ func (a *app) offerToServeAgain() {
 	if !ans.Yes {
 		return
 	}
-	in := StartServing{Port: strconv.Itoa(s.Port), Anywhere: s.Anywhere}
 	a.events <- func() {
-		if err := a.startServing(in); err != nil {
+		if err := a.startServing(a.servedLast()); err != nil {
 			a.failed("Couldn't serve the window", err.Error())
 		}
 	}
+}
+
+// servedWhere says where the window is served: its port, its relay, or
+// both.
+func (a *app) servedWhere() string {
+	var where []string
+	if srv := a.serving.server; srv != nil && srv.Addr() != "" {
+		where = append(where, srv.Addr())
+	}
+	if rl := a.serving.relay; rl != nil {
+		where = append(where, relay.Shown(rl.Addr().String()))
+	}
+	return strings.Join(where, " and ")
+}
+
+// keptRelay is the code and token the window is served under on the
+// relay at u: the ones kept, made and kept the first time. A new relay
+// keeps the code, which is the user's to change.
+func (a *app) keptRelay(u relay.URL) settings.Relay {
+	var r settings.Relay
+	if a.settings != nil {
+		r = a.settings.Relay()
+	}
+	r.URL = u.String()
+	if _, err := relay.ParseCode(r.Code); err != nil {
+		r.Code = relay.NewCode()
+	}
+	if len(r.Token) < 16 {
+		r.Token = relay.NewToken()
+	}
+	if a.settings != nil {
+		a.keep("the code this window is served under", a.settings.PutRelay(r))
+	}
+	return r
+}
+
+// relayState hears how the window's place on the relay is going.
+func (a *app) relayState(rl *relay.Listener, err error) {
+	if a.serving.relay != rl {
+		return
+	}
+	where := relay.Shown(rl.Addr().String())
+	switch {
+	case err == nil:
+		if !a.serving.reached {
+			log.Printf("served through the relay, as %s", where)
+		}
+		a.serving.reached, a.serving.trouble, a.serving.troubled = true, "", false
+	default:
+		why := err.Error()
+		if why != a.serving.trouble {
+			log.Printf("couldn't reach the relay for %s: %s; trying again", where, why)
+		}
+		if !a.serving.troubled {
+			a.serving.troubled = true
+			a.failed("Couldn't reach the relay", why+"\n\nKakel goes on trying.")
+			a.problem()
+		}
+		a.serving.reached, a.serving.trouble = false, why
+	}
+	a.showServing()
+}
+
+// newRelayCode gives the window a new code on the relay, at once when
+// it is served through one, and for the next time otherwise.
+func (a *app) newRelayCode() error {
+	code := relay.NewCode()
+	if rl := a.serving.relay; rl != nil {
+		if err := rl.SetCode(code); err != nil {
+			return err
+		}
+		a.serving.reached = false
+		log.Printf("the window is served under a new code on the relay, %s", code)
+	}
+	if a.settings != nil {
+		r := a.settings.Relay()
+		r.Code = code
+		if err := a.settings.PutRelay(r); err != nil {
+			return err
+		}
+	}
+	a.showServing()
+	if a.serving.server != nil {
+		a.tellServed()
+	}
+	return nil
+}
+
+// copyRelayLink copies the relay and the code, for a window connecting.
+func (a *app) copyRelayLink() error {
+	link := a.st.Serving.Link
+	if link == "" {
+		return errors.New("this window has no code on a relay yet")
+	}
+	a.worked("Link copied", "Paste it into Connect to Window on the other machine. It holds the relay's secret.", link)
+	return nil
+}
+
+// servedLast is serving as it was last started.
+func (a *app) servedLast() StartServing {
+	s := a.st.Serving
+	return StartServing{Port: strconv.Itoa(s.Port), Anywhere: s.Anywhere,
+		NoPort: s.NoPort, Relay: s.RelayOn, RelayURL: s.RelayURL}
 }

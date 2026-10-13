@@ -923,8 +923,7 @@ func (a *app) run(ctx context.Context) error {
 		// Served as it last closed: again as the user said to, or asked.
 		switch a.settings.ServeAtStart() {
 		case settings.ServeAlways:
-			s := a.st.Serving
-			if err := a.startServing(StartServing{Port: strconv.Itoa(s.Port), Anywhere: s.Anywhere}); err != nil {
+			if err := a.startServing(a.servedLast()); err != nil {
 				a.failed("Couldn't serve the window", err.Error())
 			}
 		case settings.ServeNever:
@@ -1190,6 +1189,10 @@ func failedTitle(in gunim.Intent) string {
 		return "Couldn't serve this window"
 	case StopServing:
 		return "Couldn't stop serving this window"
+	case NewRelayCode:
+		return "Couldn't make a new code"
+	case CopyRelayLink:
+		return "Couldn't copy the link"
 	case SharePane, UnsharePane, StopSharing:
 		return "Couldn't change what is shared"
 	case WriteSkill:
@@ -1509,6 +1512,10 @@ func (a *app) handle(in gunim.Intent) {
 		a.st.Serving.Tries++
 	case StopServing:
 		err = a.stopServing()
+	case NewRelayCode:
+		err = a.newRelayCode()
+	case CopyRelayLink:
+		err = a.copyRelayLink()
 	case DisconnectClients:
 		err = a.disconnectClients()
 	case DisconnectClient:

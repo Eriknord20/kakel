@@ -1159,3 +1159,28 @@ func TestTheFileManagerWindowsPlaceIsKeptApart(t *testing.T) {
 		t.Fatal("the file manager window's place was kept as the window's")
 	}
 }
+
+func TestTheRelayIsRemembered(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Relay{URL: "https://relay.example.com/k/abc", Code: "ABCD-EFGH", Token: "0123456789abcdef", On: true, NoPort: true, Via: "s1"}
+	if err := s.PutRelay(want); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRelayLast("https://other.example.com/k/def"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.Relay(); got != want {
+		t.Errorf("came back as %+v", got)
+	}
+	if got := again.RelayLast(); got != "https://other.example.com/k/def" {
+		t.Errorf("the last relay came back as %q", got)
+	}
+}
