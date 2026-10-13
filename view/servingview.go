@@ -489,7 +489,11 @@ func (w *Window) sshDialog(s app.Serving, u *gunim.UI) {
 		example("For instance, out from "+w.saved[0].Name+":", "ssh "+at+"-N -L 8080:intranet:80 "+names[0]+"@"+host)
 		parts = append(parts, selectable("Saved here: "+strings.Join(names, ", ")))
 	}
-	say("A saved server that is not connected is connected to on the way, when that needs nothing asked here: a key, or a password in the secrets while they are open. Otherwise the tunnel is refused, saying to connect it here first.")
+	if s.TunnelsConnect {
+		say("A saved server that is not connected is connected to on the way, when that needs nothing asked here: a key, or a password in the secrets while they are open. Otherwise the tunnel is refused, saying to connect it here first. A kakel window connected here can be gone through too.")
+	} else {
+		say("A saved server has to be connected here already. Settings › Sharing › Tunnels may connect lets a tunnel connect it on the way, when that needs nothing asked here, and go through kakel windows connected here.")
+	}
 	if direct {
 		example("-J and -W work the same way. To reach intranet's own ssh through this window:",
 			"ssh -J kakel@"+host+":"+port+" user@intranet")

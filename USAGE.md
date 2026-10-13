@@ -229,11 +229,14 @@ or a machine saved there, by its name as the commands spell it
 
     ssh -p 2222 -N -L 5432:localhost:5432 db-server@office-pc
 
-A saved server not connected over there is connected to, when that
-needs nothing asked: a key, or a secret while the secrets are open. A
-question would wait on a screen nobody may be at, so the tunnel is
-refused instead, saying to connect it there first. A kakel window saved
-there is gone through only while it is connected.
+At first a tunnel reaches what a kakel window connecting reaches: the
+servers connected over there already. Turn on Settings › Sharing ›
+Tunnels may connect, on the served machine, and a saved server not
+connected is connected to on the way, when that needs nothing asked: a
+key, or a secret while the secrets are open. A question would wait on
+a screen nobody may be at, so the tunnel is refused instead, saying to
+connect it there first. With it on, a kakel window connected over there
+can be gone through too.
 
 Through a relay, ssh runs kakel to reach it:
 

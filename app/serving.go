@@ -80,6 +80,9 @@ type Serving struct {
 	// Host is this machine's name, for the ssh commands the window
 	// explains.
 	Host string
+	// TunnelsConnect lets plain ssh's tunnels connect this window to
+	// saved servers on the way, and go through kakel windows.
+	TunnelsConnect bool
 	// Proxy is the HTTP proxy relays are reached through, as set: empty
 	// for the system's, relay.NoProxy for none.
 	Proxy string
@@ -142,6 +145,9 @@ type (
 	// CopyRelayLink copies the relay's URL and the code, for a window
 	// connecting to paste.
 	CopyRelayLink struct{}
+	// SetTunnelsConnect sets whether plain ssh's tunnels may connect
+	// this window to saved servers, and go through kakel windows.
+	SetTunnelsConnect struct{ On bool }
 	// SetRelayProxy sets the HTTP proxy relays are reached through: a
 	// URL, relay.NoProxy, or empty for the system's.
 	SetRelayProxy struct{ Proxy string }
@@ -614,6 +620,7 @@ func (a *app) showServing() {
 		r := a.settings.Relay()
 		s.RelayOn, s.NoPort, s.RelayURL, s.RelayVia = r.On, r.NoPort, r.URL, machines.ID(r.Via)
 		s.RelayLast, s.Proxy = a.settings.RelayLast(), a.settings.Proxy()
+		s.TunnelsConnect = a.settings.TunnelsConnect()
 	}
 	if host, err := os.Hostname(); err == nil {
 		s.Host = host

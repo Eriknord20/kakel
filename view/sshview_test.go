@@ -51,3 +51,17 @@ func TestTunnelsWithSSHGivesThisWindowsCommands(t *testing.T) {
 		t.Error("it says the port is this machine's only, served on all networks")
 	}
 }
+
+func TestTunnelsWithSSHSaysWhatTheSettingAllows(t *testing.T) {
+	win, _, publish := windowStage(t)
+	publish(app.State{Serving: app.Serving{On: true, Addr: "0.0.0.0:2299", Anywhere: true, Host: "desk"}})
+	win.sshDialog(win.serving, lastUI)
+	if all := strings.Join(texts(win.dialog.Body), "\n"); !strings.Contains(all, "has to be connected here already") {
+		t.Errorf("with the setting off it says:\n%s", all)
+	}
+	publish(app.State{Serving: app.Serving{On: true, Addr: "0.0.0.0:2299", Anywhere: true, Host: "desk", TunnelsConnect: true}})
+	win.sshDialog(win.serving, lastUI)
+	if all := strings.Join(texts(win.dialog.Body), "\n"); !strings.Contains(all, "is connected to on the way") {
+		t.Errorf("with the setting on it says:\n%s", all)
+	}
+}

@@ -70,6 +70,12 @@ type stored struct {
 	// its secret, to offer again.
 	RelayLast string `json:"relayLast,omitempty"`
 
+	// TunnelsConnect lets plain ssh's tunnels through a served window
+	// connect it to saved servers not connected yet, and go on through
+	// kakel windows it is connected to. Off, they reach what a kakel
+	// window connecting reaches: what is connected already.
+	TunnelsConnect bool `json:"tunnelsConnect,omitempty"`
+
 	// Proxy is the HTTP proxy a relay is reached through: a URL, "none"
 	// to go straight there, or empty for the one the system names.
 	Proxy string `json:"proxy,omitempty"`
@@ -240,6 +246,20 @@ func (s *Settings) Proxy() string {
 // PutProxy keeps the HTTP proxy a relay is reached through.
 func (s *Settings) PutProxy(proxy string) error {
 	return s.put(func(f *stored) { f.Proxy = proxy })
+}
+
+// TunnelsConnect reports whether plain ssh's tunnels may connect the
+// served window to saved servers, and go through kakel windows.
+func (s *Settings) TunnelsConnect() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.have.TunnelsConnect
+}
+
+// PutTunnelsConnect keeps whether plain ssh's tunnels may connect the
+// served window to saved servers.
+func (s *Settings) PutTunnelsConnect(on bool) error {
+	return s.put(func(f *stored) { f.TunnelsConnect = on })
 }
 
 // put changes the settings as edit says, on the file as it is now,

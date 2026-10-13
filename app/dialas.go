@@ -28,9 +28,11 @@ const unaskedFor = time.Minute
 const ThisMachineUser = "kakel"
 
 // dialAs opens a stream to addr for a plain ssh client that logged in
-// as user. A saved server not connected is connected to, when that
-// needs nothing asked; a question would wait on a screen nobody may be
-// at, so the stream is refused instead.
+// as user. With Settings › Sharing › Tunnels may connect on, a saved
+// server not connected is connected to, when that needs nothing asked,
+// as a question would wait on a screen nobody may be at; and a kakel
+// window connected here is gone through. Off, as at first, it reaches
+// the servers connected here and nothing more.
 func (a *app) dialAs(ctx context.Context, c *serve.Client, addr string) (net.Conn, error) {
 	user := c.User
 	if strings.EqualFold(user, ThisMachineUser) {
@@ -56,6 +58,18 @@ func (a *app) dialAs(ctx context.Context, c *serve.Client, addr string) (net.Con
 			return
 		}
 		called := a.machines.Name(id)
+		// Off, a tunnel reaches what a kakel window connecting would:
+		// the servers connected here, and nothing it has to connect
+		// or to go through another window for.
+		reach := a.settings != nil && a.settings.TunnelsConnect()
+		if !reach {
+			if c, ok, err := a.connOf(id); ok && err == nil && !a.machines.IsWindow(id) {
+				answer(route{conn: c})
+				return
+			}
+			answer(route{err: fmt.Errorf("%s is not connected on this machine: connect it here first, or turn on Settings › Sharing › Tunnels may connect", called)})
+			return
+		}
 		if w := a.machines.Get(id).Window; w != nil {
 			answer(route{win: func(ctx context.Context, addr string) (net.Conn, error) { return w.Serve.DialOn(ctx, "", addr) }})
 			return

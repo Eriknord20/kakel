@@ -153,19 +153,11 @@ func TestPlainSSHTunnelsGoOutFromTheMachineNamed(t *testing.T) {
 
 func TestAMachineNamedIsConnectedToWhenNothingNeedsAsking(t *testing.T) {
 	a, signer, db := plainServed(t)
-	// A key in ~/.ssh and the server's host key known: nothing to ask.
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	writeKey(t, filepath.Join(home, ".ssh", "id_ed25519"))
-	h, _ := a.machines.Saved(db)
-	line := knownhosts.Line([]string{knownhosts.Normalize(net.JoinHostPort(h.Address, strconv.Itoa(h.Port)))}, sshtestHostKey(t, h))
-	if err := os.WriteFile(filepath.Join(home, ".ssh", "known_hosts"), []byte(line+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	nothingToAsk(t, a, db)
+	a.settings = mustSettings(t)
+	a.handle(SetTunnelsConnect{On: true})
+	if !a.st.Serving.TunnelsConnect {
+		t.Fatal("the setting did not take")
 	}
 	if said, err := plainTunnel(t, a, signer, "DB Server", echo(t)); err != nil || said != "hi" {
 		t.Fatalf("got %q, %v", said, err)
@@ -278,4 +270,36 @@ func TestAPlainTunnelClosedClosesTheFarEnd(t *testing.T) {
 			return false
 		}
 	})
+}
+
+// nothingToAsk puts a key in ~/.ssh and the saved server db's host key
+// in known_hosts, so connecting to it asks nothing.
+func nothingToAsk(t *testing.T, a *app, db machines.ID) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeKey(t, filepath.Join(home, ".ssh", "id_ed25519"))
+	h, _ := a.machines.Saved(db)
+	line := knownhosts.Line([]string{knownhosts.Normalize(net.JoinHostPort(h.Address, strconv.Itoa(h.Port)))}, sshtestHostKey(t, h))
+	if err := os.WriteFile(filepath.Join(home, ".ssh", "known_hosts"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTunnelsConnectNothingUntilTurnedOn(t *testing.T) {
+	a, signer, db := plainServed(t)
+	nothingToAsk(t, a, db)
+	a.settings = mustSettings(t)
+	_, err := plainTunnel(t, a, signer, "db-server", echo(t))
+	if err == nil || !strings.Contains(err.Error(), "Tunnels may connect") {
+		t.Fatalf("got %v", err)
+	}
+	if a.machines.Get(db).Conn != nil || a.machines.Get(db).Dialing != nil {
+		t.Fatal("DB Server was connected to with the setting off")
+	}
 }

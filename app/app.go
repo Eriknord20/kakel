@@ -1200,6 +1200,8 @@ func failedTitle(in gunim.Intent) string {
 		return "Couldn't copy the link"
 	case SetRelayProxy:
 		return "Couldn't set the proxy"
+	case SetTunnelsConnect:
+		return "Couldn't change what ssh tunnels may connect"
 	case SharePane, UnsharePane, StopSharing:
 		return "Couldn't change what is shared"
 	case WriteSkill:
@@ -1525,6 +1527,13 @@ func (a *app) handle(in gunim.Intent) {
 		err = a.copyRelayLink()
 	case SetRelayProxy:
 		err = a.setRelayProxy(in.Proxy)
+	case SetTunnelsConnect:
+		if a.settings == nil {
+			err = errors.New("the settings could not be read, so this cannot be kept")
+			break
+		}
+		err = a.settings.PutTunnelsConnect(in.On)
+		a.showServing()
 	case DisconnectClients:
 		err = a.disconnectClients()
 	case DisconnectClient:

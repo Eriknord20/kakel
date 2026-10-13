@@ -1180,6 +1180,15 @@ func TestTheRelayIsRemembered(t *testing.T) {
 	if got := again.Relay(); got != want {
 		t.Errorf("came back as %+v", got)
 	}
+	if again.TunnelsConnect() {
+		t.Error("tunnels may connect, never set")
+	}
+	if err := again.PutTunnelsConnect(true); err != nil {
+		t.Fatal(err)
+	}
+	if third, err := Load(path); err != nil || !third.TunnelsConnect() {
+		t.Errorf("tunnels may connect came back off, %v", err)
+	}
 	if got := again.RelayLast(); got != "https://other.example.com/k/def" {
 		t.Errorf("the last relay came back as %q", got)
 	}

@@ -108,6 +108,8 @@ type settingsPane struct {
 
 	// Sharing.
 	atStart *widget.Segmented
+	// tunnels lets plain ssh's tunnels connect machines here.
+	tunnels *widget.Switch
 	port    *widget.NumberField
 	reach   *widget.Dropdown
 	keys    *widget.Label
@@ -462,6 +464,8 @@ func (p *settingsPane) sharing() gunim.Node {
 	for i, c := range serveAtStart {
 		titles[i] = c.title
 	}
+	p.tunnels = widget.NewSwitch("")
+	p.tunnels.OnChange = func(on bool, u *gunim.UI) gunim.Intent { p.send(app.SetTunnelsConnect{On: on}, u); return nil }
 	p.atStart = widget.NewSegmented(titles...)
 	p.atStart.OnChange = func(i int, u *gunim.UI) gunim.Intent {
 		return app.SetServeAtStart{When: serveAtStart[max(0, min(i, len(serveAtStart)-1))].value}
@@ -505,7 +509,8 @@ func (p *settingsPane) sharing() gunim.Node {
 			settingRow("When kakel starts", "If the window was served as kakel last closed.", p.atStart),
 			settingRow("Port", "0 picks a free port.", widget.NewSized(p.port, 110, 0)),
 			settingRow("Listen on", "", p.reach),
-			settingRow("Tunnels with ssh", "Plain ssh on another machine can make tunnels through a served window.", p.settingButton("How…", "serve.ssh"))),
+			settingRow("Tunnels with ssh", "Plain ssh on another machine can make tunnels through a served window.", p.settingButton("How…", "serve.ssh")),
+			settingRow("Tunnels may connect", "A tunnel through a saved server not connected here connects it, when that needs nothing asked, and one may go through a kakel window connected here. Off, tunnels reach only the servers connected here, as a kakel window connecting does.", p.tunnels)),
 		settingsSection("Keys that may connect",
 			p.keys,
 			buttons(add, p.removeK)),
@@ -568,6 +573,7 @@ func (p *settingsPane) show(st app.State, u *gunim.UI) {
 	setOn(p.autostart, st.Update.Autostart)
 	p.autostart.Disabled = !st.Update.Installed
 	setOn(p.tray, st.InTray)
+	setOn(p.tunnels, st.Serving.TunnelsConnect)
 	setOn(p.folders, st.Update.Folders)
 	p.folders.Disabled = !st.Update.Installed
 	p.installRow.set(st.Update.Installable && !st.Update.Installed, u)
