@@ -201,6 +201,12 @@ the server list as a kakel window takes the relay's URL as its address
 and the code in Code. The host key is checked as for any window, under
 the code and the relay's name: a new code is a new window to trust.
 
+Both dialogs have a Through choice: a saved server to reach the relay,
+or the window itself, through, as a server saved behind another one is
+reached. The stream goes out from that server over the SSH connection
+to it, which kakel makes first when it is not connected. A saved kakel
+window takes a Through as well.
+
 Kakel reaches a relay through the HTTP proxy that `HTTPS_PROXY` names
 or, on Windows, the one set for the system. Settings › Sharing ›
 Relays › Proxy overrides both: a URL such as

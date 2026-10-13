@@ -56,6 +56,9 @@ type (
 	ConnectWindow struct {
 		Addr, KeyFile string
 		ID            machines.ID
+		// Via is the saved server the window, or its relay, is reached
+		// through; empty for this machine, or the saved window's own.
+		Via machines.ID
 		// Only connects, and opens nothing on it.
 		Only bool
 	}
@@ -152,7 +155,7 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 		if err != nil {
 			return err
 		}
-		link, dialer = &l, a.relayDialer()
+		link = &l
 	}
 	name := in.ID
 	if name == "" {
@@ -164,6 +167,14 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 		if h, saved := a.machines.Saved(name); saved && strings.TrimSpace(in.KeyFile) == "" {
 			in.KeyFile = h.KeyFile()
 		}
+	}
+	// A saved window goes the way it was saved to, unless asked
+	// otherwise.
+	if h, saved := a.machines.Saved(name); saved && in.Via == "" {
+		in.Via = machines.ID(h.Via)
+	}
+	if link != nil {
+		dialer = a.relayDialer(in.Via)
 	}
 	if _, saved := a.machines.Saved(name); name == "" || (!saved && !a.machines.IsQuick(name)) {
 		// A quick one, or one again that was forgotten meanwhile, as
@@ -210,9 +221,13 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 				log.Printf("connecting to the window %s: %s", called, oneLine(what))
 			},
 		}
-		if link != nil {
+		switch {
+		case link != nil:
 			r.Addr, r.Shown = link.KnownAs(), link.Shown()
 			r.Through = func(ctx context.Context) (net.Conn, error) { return relay.Join(ctx, *link, dialer) }
+		case in.Via != "":
+			through := a.dialThrough(in.Via)
+			r.Through = func(ctx context.Context) (net.Conn, error) { return through(ctx, "tcp", addr) }
 		}
 		win, err := remote.ReachWindow(dctx, r)
 		a.events <- func() {
@@ -257,7 +272,7 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 			if !quiet {
 				a.done()
 			}
-			a.holdWindow(name, addr, in.KeyFile, win)
+			a.holdWindow(name, addr, in.KeyFile, in.Via, win)
 			a.dialed(logPane, name, terminal)
 		}
 	}()
@@ -278,8 +293,8 @@ func knownWindows() (string, error) {
 
 // holdWindow keeps a window connected to, following what it has open
 // and noticing when it goes.
-func (a *app) holdWindow(name machines.ID, addr, keyFile string, win *serve.Window) {
-	w := &machines.Window{Serve: win, Addr: addr, KeyFile: keyFile, Bound: map[string]string{}}
+func (a *app) holdWindow(name machines.ID, addr, keyFile string, via machines.ID, win *serve.Window) {
+	w := &machines.Window{Serve: win, Addr: addr, KeyFile: keyFile, Via: via, Bound: map[string]string{}}
 	a.machines.At(name).Window = w
 	a.machines.At(name).Dropped = false
 	a.showWindows()
@@ -357,7 +372,7 @@ func (a *app) windowGone(name machines.ID, w *machines.Window, why error) {
 			log.Printf("lost the connection to the window %s", oneLine(a.machines.Name(name)))
 		}
 		a.problem()
-		again := ConnectWindow{Addr: w.Addr, KeyFile: w.KeyFile, ID: name}
+		again := ConnectWindow{Addr: w.Addr, KeyFile: w.KeyFile, ID: name, Via: w.Via}
 		ctx, cancel := context.WithCancel(a.ctx)
 		a.withdrawLost(name)
 		a.machines.At(name).Lost = cancel

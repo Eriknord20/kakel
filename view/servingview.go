@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/marrasen/kakel/app"
+	"github.com/marrasen/kakel/machines"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/geom"
@@ -41,9 +42,11 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	relayURL := widget.NewTextField()
 	relayURL.SetText(s.RelayURL, nil)
 	relayURL.Placeholder = "https://relay.example.com/k/…"
+	relayVia, viaIDs := w.throughPicker(s.RelayVia)
 	enable := func() {
 		port.Disabled, where.Disabled = !onPort.Checked(), !onPort.Checked()
 		relayURL.Disabled = !onRelay.Checked()
+		relayVia.Disabled = !onRelay.Checked() || len(viaIDs) <= 1
 	}
 	enable()
 	onPort.OnChange = func(bool, *gunim.UI) gunim.Intent { enable(); return nil }
@@ -51,7 +54,7 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	// Said beside the field, as the field opens with a port in it and
 	// a placeholder would never show.
 	form.Add("", onPort).Add("Port", port).Add("", widget.NewLabel("0 picks a free port.")).Add("Listen on", where)
-	form.Add("", onRelay).Add("Relay", relayURL).
+	form.Add("", onRelay).Add("Relay", relayURL).Add("Through", relayVia).
 		Add("", widget.NewLabel(relayCodeSays(s)))
 	d := widget.NewDialog("Serve This Window")
 	d.Body = form
@@ -81,7 +84,8 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 		// other end. Nothing, if serving did not start.
 		w.servingAsked, w.servingTries = true, s.Tries
 		return app.StartServing{Port: port.Text(), Anywhere: where.Selected() == 1,
-			NoPort: !onPort.Checked(), Relay: onRelay.Checked(), RelayURL: relayURL.Text()}
+			NoPort: !onPort.Checked(), Relay: onRelay.Checked(), RelayURL: relayURL.Text(),
+			RelayVia: viaIDs[max(0, min(relayVia.Selected(), len(viaIDs)-1))]}
 	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
@@ -328,6 +332,8 @@ func (w *Window) connectWindowDialog(u *gunim.UI) {
 		}
 		return nil
 	}
+	via, viaIDs := w.throughPicker("")
+	via.Disabled = len(viaIDs) <= 1
 	applies := func() {
 		viaRelay := how.Selected() == 1
 		addr.Disabled = viaRelay
@@ -349,7 +355,7 @@ func (w *Window) connectWindowDialog(u *gunim.UI) {
 	d := widget.NewDialog("Connect to Window")
 	d.Body = widget.NewForm().
 		Add("", widget.NewLabel("The other window must be served, with this machine's public key in its authorized keys.")).
-		Add("Connect", how).Add("Address", addr).Add("Relay", relayURL).Add("Code", code).Add("Key file", key)
+		Add("Connect", how).Add("Address", addr).Add("Relay", relayURL).Add("Code", code).Add("Through", via).Add("Key file", key)
 	d.SetButtons("Connect", "Cancel")
 	link := func() (string, string) {
 		u, err := relay.ParseURL(relayURL.Text())
@@ -377,8 +383,30 @@ func (w *Window) connectWindowDialog(u *gunim.UI) {
 		if how.Selected() == 1 {
 			to, _ = link()
 		}
-		return app.ConnectWindow{Addr: to, KeyFile: key.Text()}
+		return app.ConnectWindow{Addr: to, KeyFile: key.Text(), Via: viaIDs[max(0, min(via.Selected(), len(viaIDs)-1))]}
 	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
+}
+
+// throughPicker offers the saved servers to reach something through,
+// after "This machine", with picked chosen, and their IDs in the same
+// order, "" for this machine. A kakel window is not offered.
+func (w *Window) throughPicker(picked machines.ID) (*widget.Dropdown, []machines.ID) {
+	labels := []string{"This machine"}
+	ids := []machines.ID{""}
+	for _, h := range w.saved {
+		if !h.Window {
+			labels = append(labels, h.Name)
+			ids = append(ids, machines.ID(h.ID))
+		}
+	}
+	d := widget.NewDropdown(widget.Labels(labels...))
+	d.Label = "Through"
+	for i, id := range ids {
+		if id != "" && id == picked {
+			d.SetSelected(i, nil)
+		}
+	}
+	return d, ids
 }

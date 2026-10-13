@@ -169,7 +169,23 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 	if patience <= 0 {
 		patience = handshakeTimeout
 	}
-	if err := nc.SetDeadline(time.Now().Add(patience)); err != nil {
+	// A stream carried inside another connection, as through a jump
+	// server, takes no deadline: a timer closing it stands in.
+	var late *time.Timer
+	deadline := func(t time.Time) error {
+		err := nc.SetDeadline(t)
+		if err == nil || cfg.Reach == nil {
+			return err
+		}
+		if late != nil {
+			late.Stop()
+		}
+		if !t.IsZero() {
+			late = time.AfterFunc(time.Until(t), func() { _ = nc.Close() })
+		}
+		return nil
+	}
+	if err := deadline(time.Now().Add(patience)); err != nil {
 		stop()
 		_ = nc.Close()
 		return nil, fmt.Errorf("serve: reach %s: %w", shown, err)
@@ -194,7 +210,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 			}
 			// The far end has answered, so what is left is signing in,
 			// which is allowed to wait on the user.
-			if err := nc.SetDeadline(time.Time{}); err != nil {
+			if err := deadline(time.Time{}); err != nil {
 				return fmt.Errorf("serve: reach %s: %w", shown, err)
 			}
 			cfg.say("it answered, with a " + key.Type() + " host key")
@@ -237,7 +253,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 	// Cleared already by the host-key callback, unless the far end got
 	// through the handshake without one, which x/crypto does not allow.
 	// Belt and braces: a session left with a deadline dies at it.
-	if err := nc.SetDeadline(time.Time{}); err != nil {
+	if err := deadline(time.Time{}); err != nil {
 		_ = cc.Close()
 		return nil, fmt.Errorf("serve: reach %s: %w", shown, err)
 	}

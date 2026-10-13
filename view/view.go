@@ -1477,8 +1477,9 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 	code := widget.NewTextField()
 	code.Placeholder = "XXXX-XXXX, for a window through a relay"
 	user.Placeholder, key.Placeholder = "your name here", "the usual keys in ~/.ssh"
-	// Through lists the other saved servers, to reach this one through.
-	// A kakel window is no jump host: it opens no SSH way on.
+	// Through lists the other saved servers, to reach this one through:
+	// a server, or a kakel window or its relay. A kakel window is no
+	// jump host: it opens no SSH way on.
 	through := []string{"Directly"}
 	ids := []string{""}
 	for _, h := range w.saved {
@@ -1578,13 +1579,9 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 			h.Folders = old.Folders
 		}
 		// A window keeps the agent tick it had, unused, so switching it
-		// back to a server brings it back. Not its route: a window
-		// naming a jump host would keep that host from being removed,
-		// for a route it never takes.
+		// back to a server brings it back. Its route it takes: a window,
+		// or its relay, can be reached through a saved server.
 		h.Setup, h.ForwardAgent = setup.Checked(), forward.Checked()
-		if h.Window {
-			h.Via = ""
-		}
 		if err := h.Validate(); err != nil {
 			return h, words.UpperFirst(err.Error()) + "."
 		}
@@ -1593,12 +1590,12 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 		}
 		return h, ""
 	}
-	// A window has no account, nothing to go through and no session to
-	// carry an agent over: those are greyed out while the type says
-	// window, rather than taken and dropped.
+	// A window has no account and no session to carry an agent over:
+	// those are greyed out while the type says window, rather than
+	// taken and dropped.
 	applies := func() {
 		window := kind.Selected() == 1
-		via.Disabled = window || len(ids) <= 1
+		via.Disabled = len(ids) <= 1
 		forward.Disabled = window
 		code.Disabled = !window
 		addr.Placeholder = "host name or address"

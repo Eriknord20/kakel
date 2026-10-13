@@ -31,6 +31,10 @@ in the server list can be one served through a relay, with its code.
 proxy `HTTPS_PROXY` names or, on Windows, the system's proxy. Settings ›
 Sharing › Relays › Proxy overrides both, or says none.
 
+**Windows and relays through a saved server.** Serving through a relay,
+connecting to a window, and a saved kakel window can go through a saved
+server, as servers behind a jump host do.
+
 ## v0.12.1-beta.1
 
 ### Fixed

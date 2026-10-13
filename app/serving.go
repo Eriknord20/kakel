@@ -60,9 +60,12 @@ type Serving struct {
 	// relay with its secret, RelayHost the relay without it, and Code
 	// what a window connecting gives there. Link is the URL and the
 	// code together, for a window connecting to paste.
-	RelayOn   bool
-	NoPort    bool
-	RelayURL  string
+	RelayOn  bool
+	NoPort   bool
+	RelayURL string
+	// RelayVia is the saved server the relay is reached through, empty
+	// for this machine.
+	RelayVia  machines.ID
 	RelayHost string
 	Code      string
 	Link      string
@@ -120,10 +123,12 @@ type (
 		Port     string
 		Anywhere bool
 		// NoPort listens on no port, and Relay serves through the relay
-		// at RelayURL as well, or instead.
+		// at RelayURL as well, or instead, reached through the saved
+		// server RelayVia, or from this machine when that is empty.
 		NoPort   bool
 		Relay    bool
 		RelayURL string
+		RelayVia machines.ID
 	}
 	// NewRelayCode gives the window a new code on the relay; the old one
 	// lets nobody else in.
@@ -387,7 +392,7 @@ func (a *app) startServing(in StartServing) error {
 		if err != nil {
 			return err
 		}
-		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: code, Token: token, Dialer: a.relayDialer(),
+		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: code, Token: token, Dialer: a.relayDialer(in.RelayVia),
 			OnState: func(code string, err error) { post(func() { a.relayState(rl, code, err) }) }})
 		if err != nil {
 			return err
@@ -449,7 +454,7 @@ func (a *app) startServing(in StartServing) error {
 		r := a.settings.Relay()
 		r.On, r.NoPort = in.Relay, in.NoPort
 		if in.Relay {
-			r.URL = relayURL.String()
+			r.URL, r.Via = relayURL.String(), string(in.RelayVia)
 		}
 		a.keep("how this window is served through a relay", a.settings.PutRelay(r))
 		a.keep("that this window is served", a.settings.PutServeOn(true))
@@ -597,7 +602,7 @@ func (a *app) showServing() {
 	}
 	if a.settings != nil {
 		r := a.settings.Relay()
-		s.RelayOn, s.NoPort, s.RelayURL = r.On, r.NoPort, r.URL
+		s.RelayOn, s.NoPort, s.RelayURL, s.RelayVia = r.On, r.NoPort, r.URL, machines.ID(r.Via)
 		s.RelayLast, s.Proxy = a.settings.RelayLast(), a.settings.Proxy()
 	}
 	if code, _, err := a.relayKept(); err == nil {
@@ -1277,12 +1282,13 @@ func (a *app) copyRelayLink() error {
 func (a *app) servedLast() StartServing {
 	s := a.st.Serving
 	return StartServing{Port: strconv.Itoa(s.Port), Anywhere: s.Anywhere,
-		NoPort: s.NoPort, Relay: s.RelayOn, RelayURL: s.RelayURL}
+		NoPort: s.NoPort, Relay: s.RelayOn, RelayURL: s.RelayURL, RelayVia: s.RelayVia}
 }
 
-// relayDialer is how this machine reaches a relay: through the HTTP
-// proxy set, or the one the system names.
-func (a *app) relayDialer() relay.Dialer {
+// relayDialer is how this machine reaches a relay: from the saved
+// server via, or from here when it is empty, and through the HTTP proxy
+// set, or the one the system names.
+func (a *app) relayDialer(via machines.ID) relay.Dialer {
 	set := ""
 	if a.settings != nil {
 		set = a.settings.Proxy()
@@ -1294,7 +1300,11 @@ func (a *app) relayDialer() relay.Dialer {
 		log.Printf("the proxy set for relays cannot be used, so the system's is: %v", err)
 		pick, _ = relay.Proxy("")
 	}
-	return relay.Dialer{Proxy: pick}
+	d := relay.Dialer{Proxy: pick}
+	if via != "" {
+		d.Dial = a.dialThrough(via)
+	}
+	return d
 }
 
 // setRelayProxy sets the HTTP proxy relays are reached through.

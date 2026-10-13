@@ -67,6 +67,9 @@ func (m *Machine) empty() bool {
 type Window struct {
 	Serve         *serve.Window
 	Addr, KeyFile string
+	// Via is the saved server it is reached through, empty for this
+	// machine.
+	Via ID
 	// Bound is the pane here showing each thing it has open, by its ID
 	// there.
 	Bound map[string]string
