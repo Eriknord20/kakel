@@ -36,7 +36,7 @@ type states struct {
 
 func newStates() *states { return &states{more: make(chan struct{}, 64)} }
 
-func (s *states) tell(err error) {
+func (s *states) tell(_ string, err error) {
 	s.mu.Lock()
 	s.errs = append(s.errs, err)
 	s.mu.Unlock()

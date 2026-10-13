@@ -328,22 +328,23 @@ func (w *Window) connectWindowDialog(u *gunim.UI) {
 		}
 		return nil
 	}
-	addr.OnChange = func(text string, u *gunim.UI) gunim.Intent {
-		if l, err := relay.ParseLink(text); err == nil {
-			addr.SetText("", u)
-			relayURL.SetText(l.Relay.String(), u)
-			code.SetText(l.Code, u)
-			how.SetSelected(1, u)
-			u.Invalidate()
-		}
-		return nil
-	}
 	applies := func() {
 		viaRelay := how.Selected() == 1
 		addr.Disabled = viaRelay
 		relayURL.Disabled, code.Disabled = !viaRelay, !viaRelay
 	}
 	applies()
+	addr.OnChange = func(text string, u *gunim.UI) gunim.Intent {
+		if l, err := relay.ParseLink(text); err == nil {
+			addr.SetText("", u)
+			relayURL.SetText(l.Relay.String(), u)
+			code.SetText(l.Code, u)
+			how.SetSelected(1, u)
+			applies()
+			u.Invalidate()
+		}
+		return nil
+	}
 	how.OnChange = func(int, *gunim.UI) gunim.Intent { applies(); return nil }
 	d := widget.NewDialog("Connect to Window")
 	d.Body = widget.NewForm().

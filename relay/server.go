@@ -100,14 +100,14 @@ type host struct {
 	code, token string
 	// from is the address it registered from.
 	from string
-	ws   *websocket.Conn
 	// knocks are the knocks waiting to be written to it, by the one
 	// goroutine that writes them.
 	knocks chan []byte
 	// waiting counts the tickets made for it not yet answered.
 	waiting int
-	// gone is closed once it has left the relay.
-	gone chan struct{}
+	// gone is closed once it has left the relay, and replaced when the
+	// same window has registered again in its place.
+	gone, replaced chan struct{}
 }
 
 // ticket is one window connecting, waiting for the stream the served
@@ -218,45 +218,50 @@ func (s *Server) serveHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from := clientAddr(r)
-	if why, status := s.mayRegister(code, token, from); why != "" {
-		http.Error(w, why, status)
-		return
-	}
-	ws, err := accept(w, r)
-	if err != nil {
-		return
-	}
-	h := &host{code: code, token: token, from: from, ws: ws, knocks: make(chan []byte, mostWaiting),
-		gone: make(chan struct{})}
+	// Registered before the WebSocket is taken, so the window can be
+	// joined the moment it hears it has been: a window connecting a
+	// moment later finds it, and its knock waits until it is told.
+	h := &host{code: code, token: token, from: from, knocks: make(chan []byte, mostWaiting),
+		gone: make(chan struct{}), replaced: make(chan struct{})}
 	s.mu.Lock()
-	// Asked again: somebody may have taken it between the check and now.
-	if why, _ := s.mayRegisterLocked(code, token, from); why != "" {
+	why, status := s.mayRegisterLocked(code, token, from)
+	if why != "" {
 		s.mu.Unlock()
-		_ = ws.Close(websocket.StatusPolicyViolation, why)
+		http.Error(w, why, status)
 		return
 	}
 	old := s.hosts[code]
 	s.hosts[code] = h
-	s.mu.Unlock()
 	if old != nil {
 		// The same window, back before the relay noticed it had gone.
-		// Not waited for: a connection that went dead takes a while to
-		// close, and this one is served meanwhile.
-		go func() { _ = old.ws.Close(websocket.StatusNormalClosure, "the same window registered again") }()
+		close(old.replaced)
 	}
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.hosts[code] == h {
+			delete(s.hosts, code)
+		}
+		close(h.gone)
+		s.mu.Unlock()
+	}()
+	ws, err := accept(w, r)
+	if err != nil {
+		return
+	}
+	defer func() { _ = ws.CloseNow() }()
 	s.logf("relay: %s registered from %s", code, from)
 
 	ctx := ws.CloseRead(r.Context())
 	go keepUp(ctx, ws, nil)
-	go s.tell(ctx, h)
-	<-ctx.Done()
-	s.mu.Lock()
-	if s.hosts[code] == h {
-		delete(s.hosts, code)
+	go s.tell(ctx, h, ws)
+	select {
+	case <-ctx.Done():
+	case <-h.replaced:
+		// Not waited for: a connection that went dead takes a while to
+		// close, and the one that replaced it is served meanwhile.
+		go func() { _ = ws.Close(websocket.StatusNormalClosure, "the same window registered again") }()
 	}
-	close(h.gone)
-	s.mu.Unlock()
-	_ = ws.CloseNow()
 	s.logf("relay: %s left", code)
 }
 
@@ -264,17 +269,17 @@ func (s *Server) serveHost(w http.ResponseWriter, r *http.Request) {
 // them here rather than from the handler of each window connecting means
 // one that gives up part way through a write cannot close the served
 // window's connection under it.
-func (s *Server) tell(ctx context.Context, h *host) {
+func (s *Server) tell(ctx context.Context, h *host, ws *websocket.Conn) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case line := <-h.knocks:
 			wctx, cancel := context.WithTimeout(ctx, pingWait)
-			err := h.ws.Write(wctx, websocket.MessageText, line)
+			err := ws.Write(wctx, websocket.MessageText, line)
 			cancel()
 			if err != nil {
-				_ = h.ws.CloseNow()
+				_ = ws.CloseNow()
 				return
 			}
 		}

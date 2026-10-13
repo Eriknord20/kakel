@@ -1166,7 +1166,7 @@ func TestTheRelayIsRemembered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Relay{URL: "https://relay.example.com/k/abc", Code: "ABCD-EFGH", Token: "0123456789abcdef", On: true, NoPort: true, Via: "s1"}
+	want := Relay{URL: "https://relay.example.com/k/abc", On: true, NoPort: true, Via: "s1"}
 	if err := s.PutRelay(want); err != nil {
 		t.Fatal(err)
 	}

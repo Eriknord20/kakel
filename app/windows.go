@@ -244,7 +244,11 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 				return
 			}
 			logLine(acct, well, "connected in "+time.Since(began).Round(10*time.Millisecond).String())
-			log.Printf("connected to the window %s at %s", oneLine(a.machines.Name(name)), shown)
+			if called := oneLine(a.machines.Name(name)); called == shown {
+				log.Printf("connected to the window %s", called)
+			} else {
+				log.Printf("connected to the window %s at %s", called, shown)
+			}
 			if link != nil && a.settings != nil {
 				a.keep("the relay connected through", a.settings.PutRelayLast(link.Relay.String()))
 				a.showServing()

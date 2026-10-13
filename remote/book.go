@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/marrasen/kakel/relay"
 	"io"
 	"io/fs"
 	"os"
@@ -469,7 +470,7 @@ func readBook(path string) ([]Host, error) {
 	if first, second, addr, dup := firstSharedServeAddr(file.Servers); dup {
 		return nil, fmt.Errorf(
 			"remote: the server list %s saves %q and %q as the window at %s",
-			path, first, second, addr)
+			path, first, second, relay.Shown(addr))
 	}
 	sortHosts(file.Servers)
 	giveIDs(file.Servers)
@@ -671,7 +672,7 @@ func readableBack(hosts []Host) error {
 	if first, second, addr, dup := firstSharedServeAddr(hosts); dup {
 		return fmt.Errorf(
 			"remote: will not write the server list: it saves %q and %q as the window at %s",
-			first, second, addr)
+			first, second, relay.Shown(addr))
 	}
 	if err := checkRoutes(hosts); err != nil {
 		return fmt.Errorf("remote: will not write the server list: %w", err)

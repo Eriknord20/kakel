@@ -189,14 +189,10 @@ type stored struct {
 
 // Relay is how the window is served through a relay.
 type Relay struct {
-	// URL is the relay, with its secret.
+	// URL is the relay, with its secret. The code the window is
+	// served under there is kept by the machine, not here, as settings
+	// can roam between machines and the code is each one's own.
 	URL string `json:"url,omitempty"`
-	// Code is what a window connecting gives the relay, and Token what
-	// tells the relay this window is the one the code is kept for. Both
-	// stay from one run to the next, so a window saved elsewhere goes
-	// on reaching this one.
-	Code  string `json:"code,omitempty"`
-	Token string `json:"token,omitempty"`
 	// On says serving goes through the relay, and NoPort that it
 	// listens on no port of its own, as the Serve dialog was last set.
 	On     bool `json:"on,omitempty"`

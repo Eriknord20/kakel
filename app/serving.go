@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"maps"
 	"net"
@@ -166,7 +167,9 @@ type serving struct {
 	// troubled says a failure to reach the relay has been shown since
 	// it was last reached, so the next is logged and not shown again.
 	troubled bool
-	clients  []*serve.Client
+	// code and token are the ones kept in RelayCodeFile, once read.
+	code, token string
+	clients     []*serve.Client
 	// carried are the tunnels each client holds through this window, as
 	// it last said.
 	carried map[*serve.Client][]serve.TunnelNote
@@ -380,9 +383,12 @@ func (a *app) startServing(in StartServing) error {
 	var lns []net.Listener
 	var rl *relay.Listener
 	if in.Relay {
-		kept := a.keptRelay(relayURL)
-		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: kept.Code, Token: kept.Token, Dialer: a.relayDialer(),
-			OnState: func(err error) { post(func() { a.relayState(rl, err) }) }})
+		code, token, err := a.keptRelay()
+		if err != nil {
+			return err
+		}
+		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: code, Token: token, Dialer: a.relayDialer(),
+			OnState: func(code string, err error) { post(func() { a.relayState(rl, code, err) }) }})
 		if err != nil {
 			return err
 		}
@@ -443,7 +449,7 @@ func (a *app) startServing(in StartServing) error {
 		r := a.settings.Relay()
 		r.On, r.NoPort = in.Relay, in.NoPort
 		if in.Relay {
-			r.URL, r.Code = relayURL.String(), rl.Code()
+			r.URL = relayURL.String()
 		}
 		a.keep("how this window is served through a relay", a.settings.PutRelay(r))
 		a.keep("that this window is served", a.settings.PutServeOn(true))
@@ -591,8 +597,11 @@ func (a *app) showServing() {
 	}
 	if a.settings != nil {
 		r := a.settings.Relay()
-		s.RelayOn, s.NoPort, s.RelayURL, s.Code = r.On, r.NoPort, r.URL, r.Code
+		s.RelayOn, s.NoPort, s.RelayURL = r.On, r.NoPort, r.URL
 		s.RelayLast, s.Proxy = a.settings.RelayLast(), a.settings.Proxy()
+	}
+	if code, _, err := a.relayKept(); err == nil {
+		s.Code = code
 	}
 	if rl := a.serving.relay; rl != nil {
 		s.RelayURL, s.Code = rl.Relay().String(), rl.Code()
@@ -1131,38 +1140,86 @@ func (a *app) servedWhere() string {
 		where = append(where, srv.Addr())
 	}
 	if rl := a.serving.relay; rl != nil {
-		where = append(where, relay.Shown(rl.Addr().String()))
+		where = append(where, rl.Addr().String())
 	}
 	return strings.Join(where, " and ")
 }
 
-// keptRelay is the code and token the window is served under on the
-// relay at u: the ones kept, made and kept the first time. A new relay
-// keeps the code, which is the user's to change.
-func (a *app) keptRelay(u relay.URL) settings.Relay {
-	var r settings.Relay
-	if a.settings != nil {
-		r = a.settings.Relay()
+// RelayCodeFile is the file the code a window is served under on a
+// relay is kept in, with the token that keeps it: beside the host key,
+// so each machine has its own, even where the settings roam between
+// machines, and nobody else can read the token.
+const RelayCodeFile = "relay_code"
+
+// keptRelay is the code and token the window is served under on a
+// relay: the ones kept, made and kept the first time they are asked
+// for.
+func (a *app) keptRelay() (code, token string, err error) {
+	code, token, err = a.relayKept()
+	if err != nil || code != "" {
+		return code, token, err
 	}
-	r.URL = u.String()
-	if _, err := relay.ParseCode(r.Code); err != nil {
-		r.Code = relay.NewCode()
+	return a.keepRelayCode(relay.NewCode(), relay.NewToken())
+}
+
+// relayKept is the code and token kept, empty when none is: nothing is
+// written to the disk until serving through a relay asks for one.
+func (a *app) relayKept() (code, token string, err error) {
+	if a.serving.code != "" {
+		return a.serving.code, a.serving.token, nil
 	}
-	if len(r.Token) < 16 {
-		r.Token = relay.NewToken()
+	path, err := a.relayCodePath()
+	if err != nil {
+		return "", "", err
 	}
-	if a.settings != nil {
-		a.keep("the code this window is served under", a.settings.PutRelay(r))
+	raw, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", "", err
 	}
-	return r
+	lines := strings.Fields(string(raw))
+	if len(lines) == 2 {
+		if c, err := relay.ParseCode(lines[0]); err == nil && len(lines[1]) >= 16 {
+			a.serving.code, a.serving.token = c, lines[1]
+			return c, lines[1], nil
+		}
+	}
+	return "", "", nil
+}
+
+// keepRelayCode keeps code and token as the ones the window is served
+// under on a relay.
+func (a *app) keepRelayCode(code, token string) (string, string, error) {
+	path, err := a.relayCodePath()
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(path, []byte(code+"\n"+token+"\n"), 0o600); err != nil {
+		return "", "", fmt.Errorf("keep the code on the relay: %w", err)
+	}
+	a.serving.code, a.serving.token = code, token
+	return code, token, nil
+}
+
+// relayCodePath is where the code on a relay is kept: beside the host
+// key.
+func (a *app) relayCodePath() (string, error) {
+	keyAt, _, err := a.servePaths()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(keyAt), RelayCodeFile), nil
 }
 
 // relayState hears how the window's place on the relay is going.
-func (a *app) relayState(rl *relay.Listener, err error) {
-	if a.serving.relay != rl {
+func (a *app) relayState(rl *relay.Listener, code string, err error) {
+	// One from before a new code, which says nothing of the new one.
+	if a.serving.relay != rl || code != rl.Code() {
 		return
 	}
-	where := relay.Shown(rl.Addr().String())
+	where := rl.Addr().String()
 	switch {
 	case err == nil:
 		if !a.serving.reached {
@@ -1187,7 +1244,14 @@ func (a *app) relayState(rl *relay.Listener, err error) {
 // newRelayCode gives the window a new code on the relay, at once when
 // it is served through one, and for the next time otherwise.
 func (a *app) newRelayCode() error {
-	code := relay.NewCode()
+	_, token, err := a.keptRelay()
+	if err != nil {
+		return err
+	}
+	code, _, err := a.keepRelayCode(relay.NewCode(), token)
+	if err != nil {
+		return err
+	}
 	if rl := a.serving.relay; rl != nil {
 		if err := rl.SetCode(code); err != nil {
 			return err
@@ -1195,17 +1259,7 @@ func (a *app) newRelayCode() error {
 		a.serving.reached = false
 		log.Printf("the window is served under a new code on the relay, %s", code)
 	}
-	if a.settings != nil {
-		r := a.settings.Relay()
-		r.Code = code
-		if err := a.settings.PutRelay(r); err != nil {
-			return err
-		}
-	}
 	a.showServing()
-	if a.serving.server != nil {
-		a.tellServed()
-	}
 	return nil
 }
 

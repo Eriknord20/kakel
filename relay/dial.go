@@ -144,9 +144,11 @@ type HostConfig struct {
 	Code, Token string
 	Dialer      Dialer
 	// OnState is told each time the window's place on the relay
-	// changes: nil once it is registered, and why not otherwise. It is
-	// called from the listener's goroutine.
-	OnState func(err error)
+	// changes, under code: nil once it is registered, and why not
+	// otherwise. It is called from the listener's goroutine, and may
+	// arrive after SetCode for the code before, which is what code is
+	// for.
+	OnState func(code string, err error)
 }
 
 // tryAgainAfter is how long to wait before reaching the relay again,
@@ -213,10 +215,12 @@ func (l *Listener) Close() error {
 	return nil
 }
 
-// Addr is the window's link.
-func (l *Listener) Addr() net.Addr {
-	return linkAddr(Link{Relay: l.cfg.Relay, Code: l.Code()}.String())
-}
+// Addr is the window's code on the relay, as it is shown: without the
+// relay's secret.
+func (l *Listener) Addr() net.Addr { return linkAddr(l.Link().Shown()) }
+
+// Link is the window's link: the relay with its secret, and the code.
+func (l *Listener) Link() Link { return Link{Relay: l.cfg.Relay, Code: l.Code()} }
 
 // Relay is the relay the window is served through.
 func (l *Listener) Relay() URL { return l.cfg.Relay }
@@ -245,10 +249,11 @@ func (l *Listener) SetCode(code string) error {
 	return nil
 }
 
-// state tells OnState, when there is one.
-func (l *Listener) state(err error) {
+// state tells OnState, when there is one, of the registration under
+// code.
+func (l *Listener) state(code string, err error) {
 	if l.cfg.OnState != nil && l.ctx.Err() == nil {
-		l.cfg.OnState(err)
+		l.cfg.OnState(code, err)
 	}
 }
 
@@ -258,7 +263,7 @@ func (l *Listener) stay() {
 	tries := 0
 	for l.ctx.Err() == nil {
 		began := time.Now()
-		err := l.registered()
+		code, err := l.registered()
 		if l.ctx.Err() != nil {
 			return
 		}
@@ -272,7 +277,7 @@ func (l *Listener) stay() {
 		if time.Since(began) > time.Minute {
 			tries = 0
 		}
-		l.state(err)
+		l.state(code, err)
 		wait := l.waits[min(tries, len(l.waits)-1)]
 		tries++
 		select {
@@ -284,8 +289,8 @@ func (l *Listener) stay() {
 }
 
 // registered registers once, and hears of windows connecting until the
-// relay is lost, returning why.
-func (l *Listener) registered() error {
+// relay is lost, returning the code it registered and why it ended.
+func (l *Listener) registered() (string, error) {
 	ctx, cancel := context.WithCancel(l.ctx)
 	defer cancel()
 	l.mu.Lock()
@@ -297,30 +302,30 @@ func (l *Listener) registered() error {
 	ws, err := l.cfg.Dialer.open(ctx, l.cfg.Relay.to(doorHost)+"?"+q.Encode(), header)
 	if err != nil {
 		if l.moved(code) {
-			return errNewCode
+			return code, errNewCode
 		}
-		return reachErr(l.cfg.Relay, err)
+		return code, reachErr(l.cfg.Relay, err)
 	}
 	defer func() { _ = ws.CloseNow() }()
 	ws.SetReadLimit(4 << 10)
 	go keepUp(ctx, ws, nil)
-	l.state(nil)
+	l.state(code, nil)
 	for {
 		kind, line, err := ws.Read(ctx)
 		if err != nil {
 			if l.ctx.Err() != nil {
-				return nil
+				return code, nil
 			}
 			if l.moved(code) {
-				return errNewCode
+				return code, errNewCode
 			}
 			if why := websocket.CloseStatus(err); why != -1 {
 				var ce websocket.CloseError
 				if errors.As(err, &ce) && ce.Reason != "" {
-					return reachErr(l.cfg.Relay, errors.New(ce.Reason))
+					return code, reachErr(l.cfg.Relay, errors.New(ce.Reason))
 				}
 			}
-			return reachErr(l.cfg.Relay, errors.New("the connection to it was lost"))
+			return code, reachErr(l.cfg.Relay, errors.New("the connection to it was lost"))
 		}
 		var k knock
 		if kind != websocket.MessageText || json.Unmarshal(line, &k) != nil || k.Ticket == "" {

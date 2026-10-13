@@ -93,6 +93,17 @@ func TestAWindowConnectsThroughARelay(t *testing.T) {
 		t.Fatalf("the client came from %q", from)
 	}
 
+	// Nothing names it by the relay's secret.
+	for _, m := range b.machines.Infos() {
+		if strings.Contains(m.Name, "/k/") || strings.Contains(m.Target, "/k/") {
+			t.Fatalf("a machine shows the secret: %+v", m)
+		}
+	}
+	// Saved work on it finds it again by the name it is shown by.
+	if id, ok := b.machines.Find(b.keptAs(b.st.Panes[0].Machine)); !ok || id != b.st.Panes[0].Machine {
+		t.Fatalf("kept as %q, found %q, %v", b.keptAs(b.st.Panes[0].Machine), id, ok)
+	}
+
 	// Typed again, it is the same window, not a second heading.
 	if got := b.windowAt(serveAddr(link.String())); got != b.st.Panes[0].Machine {
 		t.Fatalf("the link is known as %q, want %q", got, b.st.Panes[0].Machine)

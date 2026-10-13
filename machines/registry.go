@@ -221,7 +221,9 @@ func (r *Registry) Find(name string) (ID, bool) {
 		}
 	}
 	for id, q := range r.quick {
-		if q.target == name {
+		// By what it is called too: a window through a relay goes by
+		// its code, as Name gives it.
+		if q.target == name || relay.Shown(q.target) == name {
 			return id, true
 		}
 	}
@@ -297,7 +299,10 @@ func (r *Registry) Infos() []Info {
 		}
 	}
 	for id, q := range r.quick {
-		out = append(out, Info{ID: id, Name: q.target, Quick: true, Window: q.window, Target: q.target})
+		// Shown by its code, for a window through a relay, and never
+		// with the relay's secret.
+		shown := relay.Shown(q.target)
+		out = append(out, Info{ID: id, Name: shown, Quick: true, Window: q.window, Target: shown})
 	}
 	for id, name := range r.far {
 		out = append(out, Info{ID: id, Name: name})
