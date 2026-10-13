@@ -35,6 +35,11 @@ Sharing › Relays › Proxy overrides both, or says none.
 connecting to a window, and a saved kakel window can go through a saved
 server, as servers behind a jump host do.
 
+**Servers through a kakel window.** A saved server's Through can be a
+saved kakel window, served directly or through a relay. Kakel connects
+to the window first, and the window opens the stream to the server from
+its own machine.
+
 ## v0.12.1-beta.1
 
 ### Fixed

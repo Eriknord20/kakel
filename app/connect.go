@@ -101,6 +101,10 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 	// a typed target; shown is what each is called.
 	var names []machines.ID
 	var shown []string
+	// behind is the index of the kakel window the hops after it go
+	// through, -1 for none, and first dials from its machine.
+	behind := -1
+	var first func(ctx context.Context, addr string) (net.Conn, error)
 	name := in.Server
 	if in.Server != "" {
 		if a.book == nil {
@@ -117,6 +121,36 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 				key = last.Identities[0]
 			}
 			return a.reachWindow(ConnectWindow{Addr: last.ServeAddr(), KeyFile: key, ID: machines.ID(last.ID), Only: in.Only}, in.Quiet, then)
+		}
+		// Behind a kakel window: the window first, connected to as a
+		// window, and the hops after it dialled from its machine.
+		for k := len(hosts) - 2; k >= 0; k-- {
+			if !hosts[k].Window {
+				continue
+			}
+			win := machines.ID(hosts[k].ID)
+			w := a.machines.Get(win).Window
+			if w == nil {
+				return a.reachWindow(ConnectWindow{ID: win, Addr: hosts[k].ServeAddr(), KeyFile: hosts[k].KeyFile(), Only: true}, true, func(err error) {
+					if err != nil {
+						a.failed("Couldn't connect to "+a.machines.Name(name), "Through "+a.machines.Name(win)+": "+err.Error())
+						a.problem()
+						if then != nil {
+							then(err)
+						}
+						return
+					}
+					if err := a.connectThen(in, then); err != nil {
+						a.failed("Couldn't connect to "+a.machines.Name(name), err.Error())
+						if then != nil {
+							then(err)
+						}
+					}
+				})
+			}
+			behind = k
+			first = func(ctx context.Context, addr string) (net.Conn, error) { return w.Serve.DialOn(ctx, "", addr) }
+			break
 		}
 		for _, h := range hosts {
 			hops = append(hops, h.Config())
@@ -191,11 +225,15 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 	// From the nearest hop already connected, so a second server behind
 	// a jump host does not sign in to the jump host again.
 	start, from := a.machines.HopConnected(names, hops)
+	if start == nil && behind >= 0 {
+		// Nothing past the window connected yet: from the window.
+		from = behind + 1
+	}
 	// Held while the dial goes through it, so it does not close under
 	// the dial when what else went through it goes.
 	a.machines.Hold(start)
 	go func() {
-		conn, made, err := machines.DialFrom(dctx, start, from, hops, shown)
+		conn, made, err := machines.DialFromBy(dctx, start, from, hops, shown, first)
 		a.events <- func() {
 			defer a.machines.Release(start)
 			a.machines.At(name).Dialing = nil

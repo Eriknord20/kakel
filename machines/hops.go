@@ -3,6 +3,7 @@ package machines
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/marrasen/kakel/remote"
@@ -192,14 +193,25 @@ func (r *Registry) SavedOtherwise(id ID) error {
 // it, first to last. An error names the hop it came from, when that is
 // not the far end.
 func DialFrom(ctx context.Context, start *remote.Conn, from int, hops []remote.Config, names []string) (*remote.Conn, []*remote.Conn, error) {
+	return DialFromBy(ctx, start, from, hops, names, nil)
+}
+
+// DialFromBy is DialFrom, with the first hop dialled over a stream
+// first makes when nothing is connected yet to start from: through a
+// kakel window. A nil first dials from this machine.
+func DialFromBy(ctx context.Context, start *remote.Conn, from int, hops []remote.Config, names []string,
+	first func(ctx context.Context, addr string) (net.Conn, error)) (*remote.Conn, []*remote.Conn, error) {
 	var made []*remote.Conn
 	conn := start
 	for i := from; i < len(hops); i++ {
 		var next *remote.Conn
 		var err error
-		if conn == nil {
+		switch {
+		case conn == nil && first != nil:
+			next, err = remote.ConnectBy(ctx, first, hops[i])
+		case conn == nil:
 			next, err = remote.Connect(ctx, hops[i])
-		} else {
+		default:
 			next, err = conn.Through(ctx, hops[i])
 		}
 		if err != nil {

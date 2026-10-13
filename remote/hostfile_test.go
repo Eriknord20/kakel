@@ -222,6 +222,7 @@ func TestRouteRefusesWhatItCannotWalk(t *testing.T) {
 		{Name: "q", ID: "q", Address: "q.example", Via: "p"},
 		{Name: "desk", ID: "w", Address: "desk.example", Window: true},
 		{Name: "behind", ID: "b", Address: "b.example", Via: "w"},
+		{Name: "laptop", ID: "l", Address: "laptop.example", Window: true, Via: "w"},
 	}
 
 	if _, err := b.Route("nothing"); err == nil {
@@ -235,8 +236,13 @@ func TestRouteRefusesWhatItCannotWalk(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "circle") {
 		t.Errorf("error = %v, want it to say the route goes round in a circle", err)
 	}
-	if _, err := b.Route("behind"); err == nil || !strings.Contains(err.Error(), "no jump host") {
-		t.Errorf("a route through a kakel window gave %v", err)
+	// A server goes through a kakel window, which dials it from its
+	// machine; one window does not go through another.
+	if route, err := b.Route("behind"); err != nil || len(route) != 2 || !route[0].Window {
+		t.Errorf("a route through a kakel window gave %v, %v", route, err)
+	}
+	if _, err := b.Route("laptop"); err == nil || !strings.Contains(err.Error(), "not reached through another") {
+		t.Errorf("a window through a window gave %v", err)
 	}
 }
 

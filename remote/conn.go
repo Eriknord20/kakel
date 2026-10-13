@@ -209,6 +209,14 @@ func Connect(ctx context.Context, cfg Config) (*Conn, error) {
 	return connect(ctx, overTCP, nil, cfg)
 }
 
+// ConnectBy opens a connection over a stream dial makes, in place of a
+// TCP connection from this machine: one a kakel window opens from the
+// machine it is on, say. Nothing rides on anything here: whatever dial
+// goes through closes the stream when it goes.
+func ConnectBy(ctx context.Context, dial func(ctx context.Context, addr string) (net.Conn, error), cfg Config) (*Conn, error) {
+	return connect(ctx, dial, nil, cfg)
+}
+
 // Through opens a connection to another machine from this one.
 //
 // No local port is opened for it. The second connection is carried

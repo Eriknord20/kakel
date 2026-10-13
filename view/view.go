@@ -1478,13 +1478,20 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 	code.Placeholder = "XXXX-XXXX, for a window through a relay"
 	user.Placeholder, key.Placeholder = "your name here", "the usual keys in ~/.ssh"
 	// Through lists the other saved servers, to reach this one through:
-	// a server, or a kakel window or its relay. A kakel window is no
-	// jump host: it opens no SSH way on.
+	// a server, or a kakel window or its relay. A server can go through
+	// a kakel window too, which dials it from its machine; a window
+	// cannot, as it is reached over a stream of an SSH connection.
 	through := []string{"Directly"}
 	ids := []string{""}
+	windows := map[string]bool{}
 	for _, h := range w.saved {
-		if (old == nil || h.ID != old.ID) && !h.Window {
-			through = append(through, h.Name)
+		if old == nil || h.ID != old.ID {
+			label := h.Name
+			if h.Window {
+				label += " (kakel window)"
+				windows[h.ID] = true
+			}
+			through = append(through, label)
 			ids = append(ids, h.ID)
 		}
 	}
@@ -1582,6 +1589,9 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 		// back to a server brings it back. Its route it takes: a window,
 		// or its relay, can be reached through a saved server.
 		h.Setup, h.ForwardAgent = setup.Checked(), forward.Checked()
+		if h.Window && windows[h.Via] {
+			return h, "A kakel window is reached through a server, not through another window."
+		}
 		if err := h.Validate(); err != nil {
 			return h, words.UpperFirst(err.Error()) + "."
 		}

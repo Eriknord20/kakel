@@ -74,7 +74,10 @@ The whole list. The [README](README.md) has the short version.
   behind another one. The second connection is carried inside a channel
   of the first, so no local port is opened for it and nothing else on
   the machine can use it. Closing the one in the middle closes what
-  rides on it.
+  rides on it. A saved server can be behind a kakel window too, served
+  directly or through a relay: the window opens the stream from its own
+  machine, so a server on that machine's network is reached from
+  anywhere the window is.
 - **Tabs.** Each window holds tabs, and each tab a pane or a split. New
   Terminal opens one, and the tab bar shows in the title bar once there
   are two. Click a tab to show it. Middle-click it, or click its ×, to

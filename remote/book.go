@@ -339,8 +339,8 @@ func (b *Book) routeLocked(h Host) ([]Host, error) {
 		if !ok {
 			return nil, fmt.Errorf("the server %q is reached through is not saved", route[len(route)-1].Name)
 		}
-		if next.Window {
-			return nil, fmt.Errorf("%q is reached through %q, a kakel window, and a window is no jump host", route[len(route)-1].Name, next.Name)
+		if next.Window && h.Window {
+			return nil, fmt.Errorf("%q is reached through %q, and one kakel window is not reached through another", route[len(route)-1].Name, next.Name)
 		}
 		h = next
 	}
@@ -573,6 +573,10 @@ func checkRoutes(hosts []Host) error {
 			if !ok {
 				return fmt.Errorf("there is no saved server called %q to reach %q through",
 					h.Via, start.Name)
+			}
+			if next.Window && h.Window {
+				return fmt.Errorf("%q is reached through %q, and one kakel window is not reached through another",
+					h.Name, next.Name)
 			}
 			h = next
 		}
