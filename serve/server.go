@@ -114,6 +114,12 @@ type Config struct {
 	// this machine. A nil one refuses, and a client is told so.
 	OpenOn func(host, command, dir string, cols, rows int) (session.Session, Attached, error)
 
+	// DialAs opens a stream to addr for a plain SSH client's tunnel,
+	// ssh -L or ssh -J, from the machine the user name it logged in with
+	// names: a saved machine this window reaches, or this machine for
+	// "kakel". A nil one refuses, and the client is told so.
+	DialAs func(ctx context.Context, user, addr string) (net.Conn, error)
+
 	// Dial opens a stream to addr from a machine this window reaches,
 	// host as its Open named it, "" for this machine, for a tunnel a
 	// client holds. A nil one refuses, and the client is told so.
@@ -165,6 +171,11 @@ type Client struct {
 
 	// Addr is where they connected from.
 	Addr string
+
+	// User is the user name they logged in with. A kakel window sends
+	// its own; to plain ssh it names the machine its tunnels go out
+	// from.
+	User string
 
 	// At is when they arrived.
 	At time.Time
@@ -478,7 +489,7 @@ func (s *Server) handshake(nc net.Conn) {
 		signed = conn.Permissions.Extensions[keyExt]
 	}
 
-	c := &Client{Name: who, Addr: conn.RemoteAddr().String(), At: time.Now(), conn: conn, key: signed}
+	c := &Client{Name: who, Addr: conn.RemoteAddr().String(), User: conn.User(), At: time.Now(), conn: conn, key: signed}
 	if !s.add(c) {
 		// Closed while this one was authenticating.
 		_ = conn.Close()

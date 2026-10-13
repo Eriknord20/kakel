@@ -61,6 +61,9 @@ type (
 		// without it, a saved window goes the way it was saved to.
 		Via    machines.ID
 		ViaSet bool
+		// NoAsk connects only when nothing has to be asked, as
+		// ConnectTo.NoAsk.
+		NoAsk bool
 		// Only connects, and opens nothing on it.
 		Only bool
 	}
@@ -176,7 +179,7 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 		in.Via = machines.ID(h.Via)
 	}
 	if link != nil {
-		dialer = a.relayDialer(in.Via, nil)
+		dialer = a.relayDialer(in.Via, refusedFor(in))
 	}
 	if _, saved := a.machines.Saved(name); name == "" || (!saved && !a.machines.IsQuick(name)) {
 		// A quick one, or one again that was forgotten meanwhile, as
@@ -201,6 +204,9 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 	// Connected to again some other way: the question is answered.
 	a.withdrawLost(name)
 	dctx, cancel := context.WithCancel(a.ctx)
+	if in.NoAsk {
+		dctx = context.WithValue(dctx, noAsking{}, true)
+	}
 	a.machines.At(name).Dialing = cancel
 	acct := a.dialLog(name)
 	shown := relay.Shown(addr)
@@ -228,7 +234,7 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 			r.Addr, r.Shown = link.KnownAs(), link.Shown()
 			r.Through = func(ctx context.Context) (net.Conn, error) { return relay.Join(ctx, *link, dialer) }
 		case in.Via != "":
-			through := a.dialThrough(in.Via, nil)
+			through := a.dialThrough(in.Via, refusedFor(in))
 			r.Through = func(ctx context.Context) (net.Conn, error) { return through(ctx, "tcp", addr) }
 		}
 		win, err := remote.ReachWindow(dctx, r)
@@ -635,4 +641,13 @@ func (a *app) disconnect(machine machines.ID) error {
 	a.machines.At(machine).LetGo = true
 	a.machines.LetGoOfRiders(conn)
 	return conn.Close()
+}
+
+// refusedFor is what reaching the window in asks of the server it goes
+// through: nothing, when in asks nothing.
+func refusedFor(in ConnectWindow) *throughRefused {
+	if in.NoAsk {
+		return &throughRefused{noAsk: true}
+	}
+	return nil
 }

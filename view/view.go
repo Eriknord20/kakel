@@ -2069,7 +2069,7 @@ func (w *Window) Update(st app.State, u *gunim.UI) {
 		}
 		key := "client:" + c.Name + ":" + strconv.Itoa(i)
 		item := sideItem{key: key, text: "serving " + c.Name, note: "from " + c.From, local: func(u *gunim.UI) { w.servingDialog(w.serving, u) },
-			closes: app.DisconnectClient(c)}
+			closes: app.DisconnectClient{Name: c.Name, From: c.From}}
 		rows = slices.Insert(rows, at, item)
 		// Under it, a row for each tunnel it holds through this window.
 		for j, t := range st.Serving.Tunnels {

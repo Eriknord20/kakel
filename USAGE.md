@@ -214,6 +214,33 @@ Relays › Proxy overrides both: a URL such as
 proxy found only through a PAC script, or one that signs in with
 Windows (NTLM or Kerberos), is not supported yet.
 
+### Tunnels with plain ssh
+
+A served window also takes ssh's own tunnels, with the same keys and
+the same host key. There is no shell, so give `-N`:
+
+    ssh -p 2222 -N -L 8080:intranet:80 kakel@office-pc
+
+That makes port 8080 here reach `intranet` port 80 as the served
+machine finds it. `-J` and `-W` work the same way. The user name says
+where the tunnel goes out from: `kakel` for the served machine itself,
+or a machine saved there, by its name as the commands spell it
+(`db-server` for "DB Server"):
+
+    ssh -p 2222 -N -L 5432:localhost:5432 db-server@office-pc
+
+A saved server not connected over there is connected to, when that
+needs nothing asked: a key, or a secret while the secrets are open. A
+question would wait on a screen nobody may be at, so the tunnel is
+refused instead, saying to connect it there first. A kakel window saved
+there is gone through only while it is connected.
+
+Through a relay, ssh runs kakel to reach it:
+
+    ssh -o ProxyCommand="kakel -relay-pipe https://relay.example.com/k/…#7KQ2-M9XD" -N -L 8080:intranet:80 kakel@office-pc
+
+`-relay-pipe` takes `-proxy` for an HTTP proxy, or uses the system's.
+
 ## Running a relay
 
 A relay joins two kakel windows that cannot reach each other: both

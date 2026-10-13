@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,6 +63,24 @@ func (s *Server) serveChannels(ctx context.Context, c *Client, chans <-chan ssh.
 	// finish and read by this one.
 	var files, streams, logs atomic.Int32
 	for nch := range chans {
+		if nch.ChannelType() == chanDirect {
+			addr, ok := directTarget(nch.ExtraData())
+			if !ok {
+				_ = nch.Reject(ssh.ConnectionFailed, "that is not a direct-tcpip request")
+				continue
+			}
+			if streams.Load() >= mostStreams {
+				_ = nch.Reject(ssh.ResourceShortage,
+					"this kakel is already carrying as many streams as it will on one connection")
+				continue
+			}
+			streams.Add(1)
+			running.Go(func() {
+				defer streams.Add(-1)
+				s.runDirect(ctx, nch, c.User, addr)
+			})
+			continue
+		}
 		if nch.ChannelType() == chanDial {
 			var want dialOn
 			if err := ssh.Unmarshal(nch.ExtraData(), &want); err != nil {
@@ -171,8 +191,14 @@ func (s *Server) serveChannels(ctx context.Context, c *Client, chans <-chan ssh.
 			continue
 		}
 		if nch.ChannelType() != SessionChannel {
-			_ = nch.Reject(ssh.UnknownChannelType,
-				"this is kakel, and it serves "+SessionChannel)
+			why := "this is kakel, and it serves " + SessionChannel
+			if nch.ChannelType() == "session" {
+				// Plain ssh asking for a shell, as it does without -N.
+				// The name stays first: a kakel connecting to this
+				// port as a server knows a window by it.
+				why += "; plain ssh gets tunnels and no shell, so give ssh -N with -L, or use -J or -W"
+			}
+			_ = nch.Reject(ssh.UnknownChannelType, why)
 			continue
 		}
 		var want openSession
@@ -229,8 +255,32 @@ func (s *Server) runDial(ctx context.Context, nch ssh.NewChannel, want dialOn) {
 		_ = nch.Reject(ssh.Prohibited, "this kakel does not carry tunnels to the machines it reaches")
 		return
 	}
-	dctx, cancel := context.WithTimeout(ctx, dialWait)
-	far, err := s.cfg.Dial(dctx, want.Host, want.Addr)
+	s.carry(ctx, nch, dialWait, func(ctx context.Context) (net.Conn, error) { return s.cfg.Dial(ctx, want.Host, want.Addr) })
+}
+
+// runDirect dials a plain SSH client's tunnel, from the machine user
+// names, and carries it.
+func (s *Server) runDirect(ctx context.Context, nch ssh.NewChannel, user, addr string) {
+	if s.cfg.DialAs == nil {
+		_ = nch.Reject(ssh.Prohibited, "this kakel does not carry tunnels")
+		return
+	}
+	// Longer than a kakel window's: the machine named may have to be
+	// connected to first.
+	s.carry(ctx, nch, connectWait, func(ctx context.Context) (net.Conn, error) { return s.cfg.DialAs(ctx, user, addr) })
+}
+
+// connectWait is how long a plain SSH client's stream has to open,
+// connecting to the machine it goes out from on the way.
+const connectWait = time.Minute
+
+// carry dials with dial, given within to answer, and carries the stream
+// on nch until one end or the other closes it, or the client's
+// connection goes.
+func (s *Server) carry(ctx context.Context, nch ssh.NewChannel, within time.Duration,
+	dial func(ctx context.Context) (net.Conn, error)) {
+	dctx, cancel := context.WithTimeout(ctx, within)
+	far, err := dial(dctx)
 	cancel()
 	if err != nil {
 		// Said to the client, whose tunnel reports it on its own row.
@@ -254,16 +304,25 @@ func (s *Server) runDial(ctx context.Context, nch ssh.NewChannel, want dialOn) {
 	// Gone with the connection, whichever copy is waiting.
 	stop := context.AfterFunc(ctx, both)
 	defer stop()
+	// One side done sending closes that way only, as OpenSSH does: a
+	// client that has said all it will, as ssh -W with its input at an
+	// end, still hears the answer. A failure, or an end that cannot be
+	// closed one way, closes both.
 	var copies sync.WaitGroup
 	copies.Go(func() {
-		_, _ = io.Copy(ch, far)
-		both()
+		if _, err := io.Copy(ch, far); err != nil || ch.CloseWrite() != nil {
+			both()
+		}
 	})
 	copies.Go(func() {
-		_, _ = io.Copy(far, ch)
-		both()
+		_, err := io.Copy(far, ch)
+		half, ok := far.(interface{ CloseWrite() error })
+		if err != nil || !ok || half.CloseWrite() != nil {
+			both()
+		}
 	})
 	copies.Wait()
+	both()
 }
 
 // runFiles gives a client the files of a machine and carries the
@@ -594,3 +653,18 @@ type Attacher func(want Attached, cols, rows int) (session.Session, error)
 // client opens, so an implementation that touches the window has to
 // hand the work to whatever draws.
 type Opener func(cols, rows int) (session.Session, Attached, error)
+
+// directTarget reads where a direct-tcpip channel goes: a host and a
+// port, then where it came from, which is not used.
+func directTarget(payload []byte) (string, bool) {
+	var want struct {
+		Host       string
+		Port       uint32
+		OriginHost string
+		OriginPort uint32
+	}
+	if err := ssh.Unmarshal(payload, &want); err != nil || want.Port == 0 || want.Port > 65535 || want.Host == "" {
+		return "", false
+	}
+	return net.JoinHostPort(want.Host, strconv.Itoa(int(want.Port))), true
+}

@@ -53,6 +53,14 @@ func main() {
 		}
 		return
 	}
+	// Nor has a pipe to a window through a relay, which ssh starts as
+	// its ProxyCommand.
+	if relay.PipeAsked(os.Args[1:]) {
+		if err := relay.Pipe(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	// A kakel started from anywhere but its own folder opens gunim's
 	// installer, and `kakel -install` and `kakel -uninstall` are done
 	// there; the installed one goes on.

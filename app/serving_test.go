@@ -353,7 +353,7 @@ func TestOneServedWindowIsDisconnectedFromItsRow(t *testing.T) {
 	a, win := servedApp(t)
 	waitFor(t, a, "the list of what is open", func() bool { return len(win.Opens()) == 1 })
 	c := a.st.Serving.Clients[0]
-	a.handle(DisconnectClient(c))
+	a.handle(DisconnectClient{Name: c.Name, From: c.From})
 	gone := make(chan struct{})
 	go func() { _ = win.Wait(); close(gone) }()
 	waitFor(t, a, "the other window to go", func() bool {

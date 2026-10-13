@@ -40,6 +40,12 @@ saved kakel window, served directly or through a relay. Kakel connects
 to the window first, and the window opens the stream to the server from
 its own machine.
 
+**Tunnels with plain ssh.** A served window takes `ssh -N -L`, `-J`
+and `-W` with the keys it allows. The user name says where the tunnel
+goes out from: `kakel@` for the served machine, or a machine saved
+there by name, connected to on the way when that needs nothing asked.
+`kakel -relay-pipe` is the ProxyCommand that takes ssh through a relay.
+
 ## v0.12.1-beta.1
 
 ### Fixed

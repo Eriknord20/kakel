@@ -11,7 +11,8 @@ package serve
 //
 // The names carry @kakel so that an ordinary SSH client connecting
 // to a serving window is refused by name rather than being handed a
-// shell it did not ask for.
+// shell it did not ask for. What it may have is a tunnel, ssh -L or
+// ssh -J, on the standard direct-tcpip channel.
 const (
 	// SessionChannel opens something to work in on the machine being
 	// served. Its payload is openSession.
@@ -88,6 +89,10 @@ const (
 	// both ways. Its payload is dialOn. It is refused, saying why, when
 	// the dial fails.
 	chanDial = "tcp@gridterm"
+
+	// chanDirect is a plain SSH client's tunnel, as ssh -L and ssh -J
+	// ask for one: the standard channel, RFC 4254 section 7.2.
+	chanDirect = "direct-tcpip"
 
 	// chanLog carries the connection log the served window keeps for a
 	// machine it reaches, as a session that only reads: what it has so

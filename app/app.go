@@ -528,6 +528,11 @@ type (
 		// Only connects, and opens nothing on it: no terminal when
 		// nothing else waits on the connection.
 		Only bool
+		// NoAsk connects only when nothing has to be asked: a key or a
+		// secret already open is enough, and a question fails it. For
+		// a connection nobody here asked for, whose questions would
+		// wait on a screen nobody is at.
+		NoAsk bool
 	}
 	// SaveServer saves a server, in place of the one named Under when
 	// that is set.

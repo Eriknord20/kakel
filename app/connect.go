@@ -88,6 +88,12 @@ type AskFact struct{ Label, Name, Note string }
 // connection quietly.
 var errDeclined = errors.New("kakel: declined")
 
+// noAsking marks the context of a connection that asks nothing.
+type noAsking struct{}
+
+// errNoAsking is why a connection that asks nothing did not connect.
+var errNoAsking = errors.New("signing in needs a question answered on this machine, and none is asked for a connection nobody here started; connect it here first")
+
 // connect connects to a server, through the jump hosts a saved one
 // names, and opens a shell there once it is connected.
 func (a *app) connect(in ConnectTo) error { return a.connectThen(in, nil) }
@@ -120,7 +126,7 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 			if len(last.Identities) > 0 {
 				key = last.Identities[0]
 			}
-			return a.reachWindow(ConnectWindow{Addr: last.ServeAddr(), KeyFile: key, ID: machines.ID(last.ID), Only: in.Only}, in.Quiet, then)
+			return a.reachWindow(ConnectWindow{Addr: last.ServeAddr(), KeyFile: key, ID: machines.ID(last.ID), Only: in.Only, NoAsk: in.NoAsk}, in.Quiet, then)
 		}
 		// Behind a kakel window: the window first, connected to as a
 		// window, and the hops after it dialled from its machine.
@@ -131,7 +137,7 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 			win := machines.ID(hosts[k].ID)
 			w := a.machines.Get(win).Window
 			if w == nil {
-				return a.reachWindow(ConnectWindow{ID: win, Addr: hosts[k].ServeAddr(), KeyFile: hosts[k].KeyFile(), Only: true}, true, func(err error) {
+				return a.reachWindow(ConnectWindow{ID: win, Addr: hosts[k].ServeAddr(), KeyFile: hosts[k].KeyFile(), Only: true, NoAsk: in.NoAsk}, true, func(err error) {
 					if err == nil {
 						err = a.connectThen(in, then)
 						if err == nil {
@@ -205,6 +211,9 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 		return nil
 	}
 	dctx, cancel := context.WithCancel(a.ctx)
+	if in.NoAsk {
+		dctx = context.WithValue(dctx, noAsking{}, true)
+	}
 	a.machines.At(name).Dialing = cancel
 	acct := a.dialLog(name)
 	logLine(acct, "", "connecting to "+called)
@@ -379,6 +388,9 @@ func (a *app) askAboutTheOneOnItsWay(in ConnectTo, name machines.ID, then func(e
 // ask shows q and waits for the answer, or for ctx to end, which takes
 // the question away. It runs on a connection's goroutine.
 func (a *app) ask(ctx context.Context, q Ask) (AskAnswered, error) {
+	if ctx.Value(noAsking{}) != nil {
+		return AskAnswered{}, errNoAsking
+	}
 	q.ID = a.askIDs.Add(1)
 	reply := make(chan AskAnswered, 1)
 	a.events <- func() {

@@ -19,7 +19,12 @@ import (
 // relay does each time it loses its connection: asked once, and not
 // again every few seconds. It is read and written on the program's
 // goroutine.
-type throughRefused struct{ err error }
+type throughRefused struct {
+	err error
+	// noAsk connects the server gone through only when nothing has to
+	// be asked, as ConnectTo.NoAsk.
+	noAsk bool
+}
 
 // dialThrough dials from the saved server via, connecting to it first
 // when it is not connected, for a stream that is wanted from any
@@ -73,7 +78,8 @@ func (a *app) dialThrough(via machines.ID, refused *throughRefused) func(ctx con
 			}
 			// Connected as any server is, with a sign-in asked for when
 			// one is needed, and nothing opened on it.
-			err := a.connectThen(ConnectTo{Server: via, Quiet: true, Only: true}, func(err error) {
+			noAsk := refused != nil && refused.noAsk
+			err := a.connectThen(ConnectTo{Server: via, Quiet: true, Only: true, NoAsk: noAsk}, func(err error) {
 				if err != nil && refused != nil && (errors.Is(err, errDeclined) || errors.Is(err, context.Canceled) ||
 					errors.Is(err, remote.ErrHostKeyRefused)) {
 					refused.err = fmt.Errorf("signing in to %s was turned down; serve again to be asked again", a.machines.Name(via))

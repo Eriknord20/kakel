@@ -104,7 +104,10 @@ type Serving struct {
 type LocalKey struct{ Name, Path string }
 
 // ServedClient is a window connected to this one.
-type ServedClient struct{ Name, From string }
+//
+// As is the machine a plain ssh client's tunnels go out from, by the
+// user name it logged in as; empty for a kakel window.
+type ServedClient struct{ Name, From, As string }
 
 // ServedTunnel is a tunnel a window connected to this one holds through
 // it: whose, Client from From, what it forwards, and the machine here
@@ -409,6 +412,7 @@ func (a *app) startServing(in StartServing) error {
 		Open:       a.openFor,
 		OpenOn:     a.openOnFor,
 		Dial:       a.dialFor,
+		DialAs:     a.dialAs,
 		Log:        a.logFor,
 		Disconnect: a.disconnectFor,
 		StartAgain: a.startAgainFor,
@@ -621,7 +625,11 @@ func (a *app) showServing() {
 	if srv := a.serving.server; srv != nil {
 		s.On, s.Addr, s.Fingerprint = true, srv.Addr(), serve.Fingerprint(srv.HostKey())
 		for _, c := range a.serving.clients {
-			s.Clients = append(s.Clients, ServedClient{Name: c.Name, From: c.Addr})
+			sc := ServedClient{Name: c.Name, From: c.Addr}
+			if c.User != serve.WindowUser {
+				sc.As = c.User
+			}
+			s.Clients = append(s.Clients, sc)
 			for _, n := range a.serving.carried[c] {
 				on := "this machine"
 				if n.Host != "" {

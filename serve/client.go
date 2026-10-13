@@ -71,6 +71,11 @@ type Window struct {
 	watched chan struct{}
 }
 
+// WindowUser is the user name a kakel window logs in to another as.
+// Anything else is plain ssh, whose user name says where its tunnels go
+// out from.
+const WindowUser = "gridterm"
+
 // DialConfig is what reaching another window takes.
 type DialConfig struct {
 	// Addr is the machine and port it is serving on, which its host
@@ -196,7 +201,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Window, error) {
 		answered bool
 	)
 	client := &ssh.ClientConfig{
-		User: "gridterm",
+		User: WindowUser,
 		HostKeyCallback: func(hostname string, addr net.Addr, key ssh.PublicKey) error {
 			mu.Lock()
 			first := !answered

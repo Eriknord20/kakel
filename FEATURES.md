@@ -34,6 +34,10 @@ The whole list. The [README](README.md) has the short version.
   through HTTP proxies. The relay only carries bytes: the windows speak
   SSH through it, the keys allowed in are the same, and the host key is
   checked as for any window.
+- **Tunnels for plain ssh.** `ssh -N -L`, `-J` and `-W` work against a
+  served window, with the keys it allows. The user name picks where the
+  tunnel goes out from: the served machine, or a machine saved there,
+  connected to on the way when nothing has to be asked.
 - **Working in a shell that is already running over there.** The served
   window says what it has open, and choosing one of those rows opens a
   pane here on the program that is already running there, starting with
