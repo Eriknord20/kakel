@@ -57,8 +57,10 @@ type (
 		Addr, KeyFile string
 		ID            machines.ID
 		// Via is the saved server the window, or its relay, is reached
-		// through; empty for this machine, or the saved window's own.
-		Via machines.ID
+		// through, empty for this machine. ViaSet says Via was chosen;
+		// without it, a saved window goes the way it was saved to.
+		Via    machines.ID
+		ViaSet bool
 		// Only connects, and opens nothing on it.
 		Only bool
 	}
@@ -170,11 +172,11 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 	}
 	// A saved window goes the way it was saved to, unless asked
 	// otherwise.
-	if h, saved := a.machines.Saved(name); saved && in.Via == "" {
+	if h, saved := a.machines.Saved(name); saved && !in.ViaSet {
 		in.Via = machines.ID(h.Via)
 	}
 	if link != nil {
-		dialer = a.relayDialer(in.Via)
+		dialer = a.relayDialer(in.Via, nil)
 	}
 	if _, saved := a.machines.Saved(name); name == "" || (!saved && !a.machines.IsQuick(name)) {
 		// A quick one, or one again that was forgotten meanwhile, as
@@ -226,7 +228,7 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 			r.Addr, r.Shown = link.KnownAs(), link.Shown()
 			r.Through = func(ctx context.Context) (net.Conn, error) { return relay.Join(ctx, *link, dialer) }
 		case in.Via != "":
-			through := a.dialThrough(in.Via)
+			through := a.dialThrough(in.Via, nil)
 			r.Through = func(ctx context.Context) (net.Conn, error) { return through(ctx, "tcp", addr) }
 		}
 		win, err := remote.ReachWindow(dctx, r)
@@ -336,6 +338,15 @@ func (a *app) windowGone(name machines.ID, w *machines.Window, why error) {
 		return
 	}
 	a.machines.At(name).Window = nil
+	// The servers reached through it go with it: let go of with it
+	// when it was let go of, and dropped with it when it dropped.
+	if w.Leaving {
+		a.machines.Each(func(_ machines.ID, m *machines.Machine) {
+			if m.Conn != nil && m.Behind == name {
+				m.LetGo = true
+			}
+		})
+	}
 	if err := a.tunnelsDiedOn(name, w.Leaving); err != nil {
 		a.failed("Trouble closing the tunnels through "+a.machines.Name(name), err.Error())
 	}
@@ -372,7 +383,7 @@ func (a *app) windowGone(name machines.ID, w *machines.Window, why error) {
 			log.Printf("lost the connection to the window %s", oneLine(a.machines.Name(name)))
 		}
 		a.problem()
-		again := ConnectWindow{Addr: w.Addr, KeyFile: w.KeyFile, ID: name, Via: w.Via}
+		again := ConnectWindow{Addr: w.Addr, KeyFile: w.KeyFile, ID: name, Via: w.Via, ViaSet: true}
 		ctx, cancel := context.WithCancel(a.ctx)
 		a.withdrawLost(name)
 		a.machines.At(name).Lost = cancel

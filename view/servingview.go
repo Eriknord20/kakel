@@ -54,8 +54,11 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	// Said beside the field, as the field opens with a port in it and
 	// a placeholder would never show.
 	form.Add("", onPort).Add("Port", port).Add("", widget.NewLabel("0 picks a free port.")).Add("Listen on", where)
-	form.Add("", onRelay).Add("Relay", relayURL).Add("Through", relayVia).
-		Add("", widget.NewLabel(relayCodeSays(s)))
+	form.Add("", onRelay).Add("Relay", relayURL).Add("Through", relayVia)
+	if s.RelayVia != "" && !slices.Contains(viaIDs, s.RelayVia) {
+		form.Add("", widget.NewLabel("The server the relay was reached through is no longer saved, so this machine reaches it now."))
+	}
+	form.Add("", widget.NewLabel(relayCodeSays(s)))
 	d := widget.NewDialog("Serve This Window")
 	d.Body = form
 	d.SetButtons("Serve", "Cancel")
@@ -383,7 +386,7 @@ func (w *Window) connectWindowDialog(u *gunim.UI) {
 		if how.Selected() == 1 {
 			to, _ = link()
 		}
-		return app.ConnectWindow{Addr: to, KeyFile: key.Text(), Via: viaIDs[max(0, min(via.Selected(), len(viaIDs)-1))]}
+		return app.ConnectWindow{Addr: to, KeyFile: key.Text(), Via: viaIDs[max(0, min(via.Selected(), len(viaIDs)-1))], ViaSet: true}
 	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)

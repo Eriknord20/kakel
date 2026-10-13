@@ -132,19 +132,23 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 			w := a.machines.Get(win).Window
 			if w == nil {
 				return a.reachWindow(ConnectWindow{ID: win, Addr: hosts[k].ServeAddr(), KeyFile: hosts[k].KeyFile(), Only: true}, true, func(err error) {
-					if err != nil {
-						a.failed("Couldn't connect to "+a.machines.Name(name), "Through "+a.machines.Name(win)+": "+err.Error())
-						a.problem()
-						if then != nil {
-							then(err)
+					if err == nil {
+						err = a.connectThen(in, then)
+						if err == nil {
+							return
 						}
+					} else {
+						err = fmt.Errorf("through %s: %w", a.machines.Name(win), err)
+					}
+					// Said as the dial says it: to whoever asked when
+					// someone waits, and in a toast otherwise.
+					if then != nil {
+						then(err)
 						return
 					}
-					if err := a.connectThen(in, then); err != nil {
+					if !in.Quiet && !errors.Is(err, errDeclined) && !errors.Is(err, context.Canceled) {
 						a.failed("Couldn't connect to "+a.machines.Name(name), err.Error())
-						if then != nil {
-							then(err)
-						}
+						a.problem()
 					}
 				})
 			}
@@ -225,9 +229,10 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 	// From the nearest hop already connected, so a second server behind
 	// a jump host does not sign in to the jump host again.
 	start, from := a.machines.HopConnected(names, hops)
-	if start == nil && behind >= 0 {
-		// Nothing past the window connected yet: from the window.
-		from = behind + 1
+	if behind >= 0 && from <= behind {
+		// Nothing past the window connected yet: from the window. A hop
+		// before it is the window's way in, not one to dial through.
+		start, from = nil, behind+1
 	}
 	// Held while the dial goes through it, so it does not close under
 	// the dial when what else went through it goes.
@@ -270,6 +275,10 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 			}
 			m := a.machines.At(name)
 			m.Conn, m.SavedID = conn, savedID
+			m.Behind = ""
+			if behind >= 0 {
+				m.Behind = names[behind]
+			}
 			m.Since, m.RTT = time.Now(), 0
 			a.machines.KeepHops(conn, names, hops, made)
 			m.Dropped = false

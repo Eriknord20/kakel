@@ -121,13 +121,13 @@ func TestTheProxyForRelaysIsCheckedAndKept(t *testing.T) {
 	if a.st.Serving.Proxy != "http://proxy.example.com:8080" {
 		t.Fatalf("the proxy is %q", a.st.Serving.Proxy)
 	}
-	pick := a.relayDialer("").Proxy
+	pick := a.relayDialer("", nil).Proxy
 	r := httptest.NewRequest("GET", "https://relay.example.com/k/x", nil)
 	if u, err := pick(r); err != nil || u == nil || u.Host != "proxy.example.com:8080" {
 		t.Fatalf("a relay is reached through %v, %v", u, err)
 	}
 	a.handle(SetRelayProxy{Proxy: relay.NoProxy})
-	if a.relayDialer("").Proxy != nil {
+	if a.relayDialer("", nil).Proxy != nil {
 		t.Fatal("none still goes through a proxy")
 	}
 }

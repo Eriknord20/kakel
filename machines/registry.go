@@ -54,7 +54,10 @@ type Machine struct {
 	// offering to connect to a dropped window again.
 	Dropped bool
 	LetGo   bool
-	Lost    context.CancelFunc
+	// Behind is the kakel window its connection goes through, empty
+	// for one that goes through none: it ends when that window goes.
+	Behind ID
+	Lost   context.CancelFunc
 }
 
 // empty reports whether nothing is kept on the machine any more.

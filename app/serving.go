@@ -392,7 +392,7 @@ func (a *app) startServing(in StartServing) error {
 		if err != nil {
 			return err
 		}
-		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: code, Token: token, Dialer: a.relayDialer(in.RelayVia),
+		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: code, Token: token, Dialer: a.relayDialer(in.RelayVia, &throughRefused{}),
 			OnState: func(code string, err error) { post(func() { a.relayState(rl, code, err) }) }})
 		if err != nil {
 			return err
@@ -1287,8 +1287,9 @@ func (a *app) servedLast() StartServing {
 
 // relayDialer is how this machine reaches a relay: from the saved
 // server via, or from here when it is empty, and through the HTTP proxy
-// set, or the one the system names.
-func (a *app) relayDialer(via machines.ID) relay.Dialer {
+// set, or the one the system names. refused, when set, keeps a sign-in
+// to via turned down from being asked for again.
+func (a *app) relayDialer(via machines.ID, refused *throughRefused) relay.Dialer {
 	set := ""
 	if a.settings != nil {
 		set = a.settings.Proxy()
@@ -1302,7 +1303,7 @@ func (a *app) relayDialer(via machines.ID) relay.Dialer {
 	}
 	d := relay.Dialer{Proxy: pick}
 	if via != "" {
-		d.Dial = a.dialThrough(via)
+		d.Dial = a.dialThrough(via, refused)
 	}
 	return d
 }
