@@ -77,7 +77,7 @@ func (s *Server) serveChannels(ctx context.Context, c *Client, chans <-chan ssh.
 			streams.Add(1)
 			running.Go(func() {
 				defer streams.Add(-1)
-				s.runDirect(ctx, nch, c.User, addr)
+				s.runDirect(ctx, nch, c, addr)
 			})
 			continue
 		}
@@ -258,16 +258,16 @@ func (s *Server) runDial(ctx context.Context, nch ssh.NewChannel, want dialOn) {
 	s.carry(ctx, nch, dialWait, func(ctx context.Context) (net.Conn, error) { return s.cfg.Dial(ctx, want.Host, want.Addr) })
 }
 
-// runDirect dials a plain SSH client's tunnel, from the machine user
-// names, and carries it.
-func (s *Server) runDirect(ctx context.Context, nch ssh.NewChannel, user, addr string) {
+// runDirect dials a plain SSH client's tunnel, from the machine its
+// user name names, and carries it.
+func (s *Server) runDirect(ctx context.Context, nch ssh.NewChannel, c *Client, addr string) {
 	if s.cfg.DialAs == nil {
 		_ = nch.Reject(ssh.Prohibited, "this kakel does not carry tunnels")
 		return
 	}
 	// Longer than a kakel window's: the machine named may have to be
 	// connected to first.
-	s.carry(ctx, nch, connectWait, func(ctx context.Context) (net.Conn, error) { return s.cfg.DialAs(ctx, user, addr) })
+	s.carry(ctx, nch, connectWait, func(ctx context.Context) (net.Conn, error) { return s.cfg.DialAs(ctx, c, addr) })
 }
 
 // connectWait is how long a plain SSH client's stream has to open,
@@ -293,7 +293,6 @@ func (s *Server) carry(ctx context.Context, nch ssh.NewChannel, within time.Dura
 		s.onError(fmt.Errorf("serve: take a stream: %w", err))
 		return
 	}
-	go ssh.DiscardRequests(reqs)
 	var once sync.Once
 	both := func() {
 		once.Do(func() {
@@ -301,6 +300,14 @@ func (s *Server) carry(ctx context.Context, nch ssh.NewChannel, within time.Dura
 			_ = far.Close()
 		})
 	}
+	// The requests end only when the client has closed the channel
+	// both ways, which reads as no more than the end of what it sends:
+	// then the far end goes too, rather than being waited on for an
+	// end it may never send.
+	go func() {
+		ssh.DiscardRequests(reqs)
+		both()
+	}()
 	// Gone with the connection, whichever copy is waiting.
 	stop := context.AfterFunc(ctx, both)
 	defer stop()

@@ -2,19 +2,26 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/marrasen/kakel/machines"
 	"github.com/marrasen/kakel/remote"
+	"github.com/marrasen/kakel/serve"
 )
 
 // Plain ssh tunnels through a served window. ssh -L and ssh -J ask for
 // a stream to an address; the user name they logged in with says where
 // it goes out from: kakel for this machine, or a saved machine by name,
 // as the commands spell it, "db-server" for "DB Server".
+
+// unaskedFor is how long a machine that needed asking to connect is
+// not tried again for a plain ssh tunnel.
+const unaskedFor = time.Minute
 
 // ThisMachineUser is the user name that has plain ssh's tunnels go out
 // from the machine being served.
@@ -24,7 +31,8 @@ const ThisMachineUser = "kakel"
 // as user. A saved server not connected is connected to, when that
 // needs nothing asked; a question would wait on a screen nobody may be
 // at, so the stream is refused instead.
-func (a *app) dialAs(ctx context.Context, user, addr string) (net.Conn, error) {
+func (a *app) dialAs(ctx context.Context, c *serve.Client, addr string) (net.Conn, error) {
+	user := c.User
 	if strings.EqualFold(user, ThisMachineUser) {
 		var d net.Dialer
 		return d.DialContext(ctx, "tcp", addr)
@@ -71,8 +79,26 @@ func (a *app) dialAs(ctx context.Context, user, addr string) (net.Conn, error) {
 			take(nil)
 			return
 		}
-		log.Printf("connecting to %s for a tunnel through this window", called)
-		if err := a.connectThen(ConnectTo{Server: id, Quiet: true, Only: true, NoAsk: true}, take); err != nil {
+		// One that needed asking a moment ago needs it still: not tried
+		// again for every stream, which a server counting failed
+		// sign-ins would hold against this machine.
+		if at, ok := a.serving.unasked[id]; ok && time.Since(at) < unaskedFor {
+			take(errNoAsking)
+			return
+		}
+		// Said in the Window Log, by whose key: a connection made for
+		// somebody elsewhere, with nobody here asked.
+		log.Printf("connecting to %s for a tunnel %s asked for with plain ssh, from %s", called, c.Name, c.Addr)
+		err := a.connectThen(ConnectTo{Server: id, Quiet: true, Only: true, NoAsk: true}, func(err error) {
+			if errors.Is(err, errNoAsking) {
+				if a.serving.unasked == nil {
+					a.serving.unasked = map[machines.ID]time.Time{}
+				}
+				a.serving.unasked[id] = time.Now()
+			}
+			take(err)
+		})
+		if err != nil {
 			take(err)
 		}
 	}

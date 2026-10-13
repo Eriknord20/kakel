@@ -197,7 +197,8 @@ func (a *app) reachWindow(in ConnectWindow, quiet bool, then func(error)) error 
 		// On its way already: that connection is the one asked for, and
 		// whoever asked hears how it went.
 		if then != nil {
-			a.machines.At(name).Waiters = append(a.machines.At(name).Waiters, then)
+			a.machines.At(name).Waiters = append(a.machines.At(name).Waiters,
+				a.orAsking(in.NoAsk, func() error { return a.reachWindow(in, quiet, then) }, then))
 		}
 		return nil
 	}

@@ -177,7 +177,10 @@ type serving struct {
 	troubled bool
 	// code and token are the ones kept in RelayCodeFile, once read.
 	code, token string
-	clients     []*serve.Client
+	// unasked are the saved machines a plain ssh tunnel could not
+	// connect to without asking, and when.
+	unasked map[machines.ID]time.Time
+	clients []*serve.Client
 	// carried are the tunnels each client holds through this window, as
 	// it last said.
 	carried map[*serve.Client][]serve.TunnelNote

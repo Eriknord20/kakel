@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -189,4 +191,91 @@ func sshtestHostKey(t *testing.T, h remote.Host) ssh.PublicKey {
 		t.Fatalf("no host key from %s: %v", h.Address, err)
 	}
 	return key
+}
+
+func TestAConnectionThatAsksNothingDoesNotOpenTheSecrets(t *testing.T) {
+	a, _ := agentApp(t)
+	q := newAsker(a, "x").keeping(&signIns{})
+	ctx := context.WithValue(t.Context(), noAsking{}, true)
+	if q.unlockFor(ctx, "hint", AskFact{}) {
+		t.Fatal("the secrets were opened")
+	}
+	if len(a.st.Asks) > 0 {
+		t.Fatalf("asked %+v", a.st.Asks)
+	}
+}
+
+// plainStream logs in to a's window as kakel and opens a tunnel to
+// addr, handing it to use while a's events are pumped.
+func plainStream(t *testing.T, a *app, signer ssh.Signer, addr string, use func(nc net.Conn)) {
+	t.Helper()
+	asAgent(t, a, func() {
+		c, err := ssh.Dial("tcp", a.st.Serving.Addr, &ssh.ClientConfig{User: "kakel",
+			Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)}, HostKeyCallback: ssh.InsecureIgnoreHostKey()})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() { _ = c.Close() }()
+		nc, err := c.Dial("tcp", addr)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		use(nc)
+	})
+}
+
+func TestAPlainTunnelHearsTheAnswerAfterSayingAllItWill(t *testing.T) {
+	a, signer, _ := plainServed(t)
+	plainStream(t, a, signer, echo(t), func(nc net.Conn) {
+		_, _ = nc.Write([]byte("hi"))
+		// As ssh -W does when its input ends.
+		if err := nc.(interface{ CloseWrite() error }).CloseWrite(); err != nil {
+			t.Error(err)
+			return
+		}
+		got, err := io.ReadAll(nc)
+		if err != nil || string(got) != "hi" {
+			t.Errorf("heard %q, %v", got, err)
+		}
+	})
+}
+
+func TestAPlainTunnelClosedClosesTheFarEnd(t *testing.T) {
+	a, signer, _ := plainServed(t)
+	// A far end that never closes by itself, and says so when it is
+	// closed under it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	closed := make(chan struct{})
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, c)
+		for {
+			if _, err := c.Write([]byte("x")); err != nil {
+				close(closed)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+	plainStream(t, a, signer, ln.Addr().String(), func(nc net.Conn) {
+		_, _ = nc.Write([]byte("hi"))
+		_ = nc.Close()
+	})
+	waitFor(t, a, "the far end to be closed", func() bool {
+		select {
+		case <-closed:
+			return true
+		default:
+			return false
+		}
+	})
 }

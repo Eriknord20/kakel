@@ -88,6 +88,25 @@ type AskFact struct{ Label, Name, Note string }
 // connection quietly.
 var errDeclined = errors.New("kakel: declined")
 
+// orAsking is then, for one waiting on a connection already on its way
+// that may ask what that one could not: when that one failed for want
+// of asking, again tries once more, asking, and then hears how that
+// went.
+func (a *app) orAsking(noAsk bool, again func() error, then func(error)) func(error) {
+	if noAsk {
+		return then
+	}
+	return func(err error) {
+		if !errors.Is(err, errNoAsking) {
+			then(err)
+			return
+		}
+		if err := again(); err != nil {
+			then(err)
+		}
+	}
+}
+
 // noAsking marks the context of a connection that asks nothing.
 type noAsking struct{}
 
@@ -204,7 +223,7 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 	if a.machines.Get(name).Dialing != nil {
 		if in.Quiet && then != nil {
 			// The one on its way will do: nobody is asked.
-			a.machines.At(name).Waiters = append(a.machines.At(name).Waiters, then)
+			a.machines.At(name).Waiters = append(a.machines.At(name).Waiters, a.orAsking(in.NoAsk, func() error { return a.connectThen(in, then) }, then))
 			return nil
 		}
 		a.askAboutTheOneOnItsWay(in, name, then)

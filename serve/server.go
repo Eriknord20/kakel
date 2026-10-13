@@ -118,7 +118,7 @@ type Config struct {
 	// ssh -L or ssh -J, from the machine the user name it logged in with
 	// names: a saved machine this window reaches, or this machine for
 	// "kakel". A nil one refuses, and the client is told so.
-	DialAs func(ctx context.Context, user, addr string) (net.Conn, error)
+	DialAs func(ctx context.Context, c *Client, addr string) (net.Conn, error)
 
 	// Dial opens a stream to addr from a machine this window reaches,
 	// host as its Open named it, "" for this machine, for a tunnel a
