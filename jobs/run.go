@@ -131,7 +131,6 @@ func (j *Job) named(ctx context.Context) ([]item, error) {
 		}
 		from := vfs.Join(j.op.From, j.op.At, name)
 		e, err := j.op.From.Stat(from)
-		e = e.Stored()
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +207,6 @@ func (j *Job) plan(ctx context.Context) ([]item, error) {
 			to = vfs.Join(j.op.To, j.op.Into, name)
 		}
 		e, err := j.op.From.Stat(from)
-		e = e.Stored()
 		if err != nil {
 			return nil, err
 		}
@@ -240,9 +238,6 @@ func (j *Job) walk(ctx context.Context, into []item, from, to string, e vfs.Entr
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		// A zip in the folder is a file to copy, not a directory to
-		// walk into, whatever the browser shows it as.
-		child = child.Stored()
 		childTo := ""
 		if to != "" {
 			childTo = vfs.Join(j.op.To, to, child.Name)
@@ -398,7 +393,6 @@ func (j *Job) put(ctx context.Context, it item) (wrote string, err error) {
 	to := it.to
 	over := false
 	have, err := j.op.To.Stat(to)
-	have = have.Stored()
 	switch {
 	case err == nil:
 		// Something is there. A directory over a directory is not a
@@ -767,7 +761,6 @@ func (j *Job) rename(ctx context.Context, items []item) error {
 
 		to := it.to
 		have, err := j.op.To.Stat(to)
-		have = have.Stored()
 		switch {
 		case err == nil:
 			choice, err := j.decide(ctx, Conflict{

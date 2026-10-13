@@ -56,14 +56,20 @@ type fmPane struct {
 // path or at home, where at says. A file on this computer opens its
 // folder, with the file selected.
 func (a *app) newFilePane(machine machines.ID, fsys filemanager.FS, path string, at Placement) error {
-	if a.files == nil {
-		return errNoFileManager
-	}
 	pick := ""
 	if machine == machines.Local {
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			path, pick = filepath.Dir(path), filepath.Base(path)
 		}
+	}
+	return a.filePaneAt(machine, fsys, path, pick, at)
+}
+
+// filePaneAt opens a file manager pane on fsys, the files of machine, at
+// path, as the file manager takes it, with the item pick selected.
+func (a *app) filePaneAt(machine machines.ID, fsys filemanager.FS, path, pick string, at Placement) error {
+	if a.files == nil {
+		return errNoFileManager
 	}
 	a.next++
 	id := "p" + itoa(a.next)
@@ -171,7 +177,8 @@ func (a *app) openFilePaneLike(o filemanager.Options) {
 	if fsys == nil {
 		fsys = filemanager.LocalFS()
 	}
-	if err := a.newFilePane(machineOfFS(fsys.ID()), fsys, o.Dir, Placement{}); err != nil {
+	// The file manager asks for a place it shows, as a zip it opens.
+	if err := a.filePaneAt(machineOfFS(fsys.ID()), fsys, o.Dir, "", Placement{}); err != nil {
 		a.failed("Couldn't open the files", err.Error())
 	}
 }

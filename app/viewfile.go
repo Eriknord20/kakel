@@ -93,7 +93,7 @@ func readView(f vfs.FS, path string) (data []byte, cut bool, why string) {
 			return nil, false, err.Error()
 		}
 		if e.Mode&fs.ModeSymlink == 0 {
-			if !e.Mode.IsRegular() || e.Archive {
+			if !e.Mode.IsRegular() {
 				return nil, false, fmt.Sprintf("%s is not a file that can be shown", path)
 			}
 			break

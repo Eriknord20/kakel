@@ -384,7 +384,14 @@ func (a *app) transferFiles(ctx context.Context, _ *filemanager.Window, t filema
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+		if t.From != nil {
+			fs[0] = t.From
+		}
 		return filemanager.ZipFiles(ctx, fs[0], t.Paths, fs[1], t.Into, t.Zip, t.Password, p)
+	}
+	if t.From != nil {
+		// The items are in an archive, which only the file manager reads.
+		o.ff = &fmSource{f: t.From}
 	}
 	kind, verb := jobs.Copy, "Copying"
 	if t.Move {
