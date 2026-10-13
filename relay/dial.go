@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,10 @@ type Dialer struct {
 	// there is one: through a jump server, say. A nil one dials from
 	// this machine.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// tls is what checks the relay's certificate, nil for the system's
+	// roots; a test's relay has a certificate of its own.
+	tls *tls.Config
 }
 
 // open opens a WebSocket to one of the relay's doors.
@@ -45,6 +51,7 @@ func (d Dialer) open(ctx context.Context, to string, header http.Header) (*webso
 		Proxy:               d.Proxy,
 		DialContext:         dial,
 		TLSHandshakeTimeout: dialWithin,
+		TLSClientConfig:     d.tls,
 		DisableKeepAlives:   true,
 	}
 	defer tr.CloseIdleConnections()
@@ -59,9 +66,23 @@ func (d Dialer) open(ctx context.Context, to string, header http.Header) (*webso
 		if resp != nil && resp.StatusCode != http.StatusSwitchingProtocols {
 			return nil, said(resp, err)
 		}
-		return nil, err
+		return nil, unsaid(err)
 	}
 	return ws, nil
+}
+
+// unsaid is why a request could not be made, without the URL it was
+// made to: that holds the relay's secret, which is never shown.
+func unsaid(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	why := ue.Err
+	if strings.Contains(why.Error(), "Proxy Authentication Required") {
+		return errors.New("the proxy wants a user name and password: give them in its URL, as http://user:password@proxy:8080")
+	}
+	return why
 }
 
 // reachErr says the relay could not be reached, and why.

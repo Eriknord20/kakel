@@ -27,6 +27,10 @@ Kakel reaches the relay again by itself when the network comes back.
 relay's URL and a code, or the copied link pasted whole. A kakel window
 in the server list can be one served through a relay, with its code.
 
+**Relays through HTTP proxies.** Kakel reaches a relay through the
+proxy `HTTPS_PROXY` names or, on Windows, the system's proxy. Settings ›
+Sharing › Relays › Proxy overrides both, or says none.
+
 ## v0.12.1-beta.1
 
 ### Fixed

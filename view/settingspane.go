@@ -17,6 +17,7 @@ import (
 	"github.com/marrasen/kakel/conf"
 	"github.com/marrasen/kakel/keys"
 	"github.com/marrasen/kakel/look"
+	"github.com/marrasen/kakel/relay"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/serve"
 	"github.com/marrasen/kakel/settings"
@@ -94,10 +95,12 @@ type settingsPane struct {
 
 	// Terminal.
 	startIn, termProgram *savedLine
-	shell                *widget.Dropdown
-	shellIDs             []string
-	known                *widget.Dropdown
-	pasteCheck           *widget.Switch
+	// proxy is the HTTP proxy relays are reached through.
+	proxy      *savedLine
+	shell      *widget.Dropdown
+	shellIDs   []string
+	known      *widget.Dropdown
+	pasteCheck *widget.Switch
 
 	// Notifications.
 	iface         *widget.Checkbox
@@ -475,6 +478,12 @@ func (p *settingsPane) sharing() gunim.Node {
 		p.send(app.SetServeDefaults{Port: int(p.port.Value()), Anywhere: i == 1}, u)
 		return nil
 	}
+	p.proxy = p.newSavedLine("the system's", 280, func(s string) string {
+		if _, err := relay.ParseProxy(s); err != nil {
+			return words.UpperFirst(err.Error()) + "."
+		}
+		return ""
+	}, func(s string) gunim.Intent { return app.SetRelayProxy{Proxy: s} })
 	p.keys = widget.NewLabel("")
 	add := widget.NewButton("Add Key…")
 	add.OnClick = func(u *gunim.UI) gunim.Intent { p.w.addKeyDialogFrom(p.st.Serving, false, u); return nil }
@@ -499,6 +508,10 @@ func (p *settingsPane) sharing() gunim.Node {
 		settingsSection("Keys that may connect",
 			p.keys,
 			buttons(add, p.removeK)),
+		settingsSection("Relays",
+			faintLabel("A relay joins two windows that cannot reach each other: run kakel -relay on a server, then serve or connect through it."),
+			settingRow("Proxy", "Empty uses HTTPS_PROXY or, on Windows, the system's proxy; none goes straight to the relay. A PAC script or a Windows (NTLM) proxy login is not supported.",
+				p.proxy.node)),
 	)
 }
 
@@ -605,6 +618,7 @@ func (p *settingsPane) show(st app.State, u *gunim.UI) {
 	}
 	p.shell.SetSelected(max(slices.Index(p.shellIDs, st.ChosenShell), 0), nil)
 	p.termProgram.show(st.TermProgram, u)
+	p.proxy.show(st.Serving.Proxy, u)
 	setOn(p.pasteCheck, st.PasteCheck)
 	p.known.SetSelected(0, nil)
 	if i := slices.Index(app.KnownTerminals, st.TermProgram); i >= 0 {

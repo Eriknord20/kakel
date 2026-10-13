@@ -200,6 +200,13 @@ the server list as a kakel window takes the relay's URL as its address
 and the code in Code. The host key is checked as for any window, under
 the code and the relay's name: a new code is a new window to trust.
 
+Kakel reaches a relay through the HTTP proxy that `HTTPS_PROXY` names
+or, on Windows, the one set for the system. Settings › Sharing ›
+Relays › Proxy overrides both: a URL such as
+`http://user:password@proxy:8080`, or `none` to go straight there. A
+proxy found only through a PAC script, or one that signs in with
+Windows (NTLM or Kerberos), is not supported yet.
+
 ## Running a relay
 
 A relay joins two kakel windows that cannot reach each other: both

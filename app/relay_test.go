@@ -98,3 +98,25 @@ func TestAWindowConnectsThroughARelay(t *testing.T) {
 		t.Fatalf("the link is known as %q, want %q", got, b.st.Panes[0].Machine)
 	}
 }
+
+func TestTheProxyForRelaysIsCheckedAndKept(t *testing.T) {
+	a, _ := agentApp(t)
+	a.settings = mustSettings(t)
+	a.handle(SetRelayProxy{Proxy: "ftp://nope:21"})
+	if a.st.Serving.Proxy != "" {
+		t.Fatalf("a bad proxy was kept: %q", a.st.Serving.Proxy)
+	}
+	a.handle(SetRelayProxy{Proxy: "http://proxy.example.com:8080"})
+	if a.st.Serving.Proxy != "http://proxy.example.com:8080" {
+		t.Fatalf("the proxy is %q", a.st.Serving.Proxy)
+	}
+	pick := a.relayDialer().Proxy
+	r := httptest.NewRequest("GET", "https://relay.example.com/k/x", nil)
+	if u, err := pick(r); err != nil || u == nil || u.Host != "proxy.example.com:8080" {
+		t.Fatalf("a relay is reached through %v, %v", u, err)
+	}
+	a.handle(SetRelayProxy{Proxy: relay.NoProxy})
+	if a.relayDialer().Proxy != nil {
+		t.Fatal("none still goes through a proxy")
+	}
+}

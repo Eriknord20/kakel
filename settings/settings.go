@@ -70,6 +70,10 @@ type stored struct {
 	// its secret, to offer again.
 	RelayLast string `json:"relayLast,omitempty"`
 
+	// Proxy is the HTTP proxy a relay is reached through: a URL, "none"
+	// to go straight there, or empty for the one the system names.
+	Proxy string `json:"proxy,omitempty"`
+
 	// AgentHost is the agent program the hand-over dialog last wrote a
 	// prompt for, by the name that dialog offers.
 	AgentHost *string `json:"agentHost,omitempty"`
@@ -227,6 +231,19 @@ func (s *Settings) RelayLast() string {
 // PutRelayLast keeps the relay last connected to a window through.
 func (s *Settings) PutRelayLast(url string) error {
 	return s.put(func(f *stored) { f.RelayLast = url })
+}
+
+// Proxy is the HTTP proxy a relay is reached through, as set: empty
+// for the system's.
+func (s *Settings) Proxy() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.have.Proxy
+}
+
+// PutProxy keeps the HTTP proxy a relay is reached through.
+func (s *Settings) PutProxy(proxy string) error {
+	return s.put(func(f *stored) { f.Proxy = proxy })
 }
 
 // put changes the settings as edit says, on the file as it is now,

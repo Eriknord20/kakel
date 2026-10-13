@@ -8,7 +8,6 @@ import (
 	"log"
 	"maps"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -74,6 +73,9 @@ type Serving struct {
 	// RelayLast is the relay last connected to a window through, to
 	// offer again.
 	RelayLast string
+	// Proxy is the HTTP proxy relays are reached through, as set: empty
+	// for the system's, relay.NoProxy for none.
+	Proxy string
 	// Allowed are the keys that may connect, by name, from the file at
 	// AllowedAt, Keys the same keys with their fingerprints, and
 	// Problem what stops that file being read.
@@ -128,6 +130,9 @@ type (
 	// CopyRelayLink copies the relay's URL and the code, for a window
 	// connecting to paste.
 	CopyRelayLink struct{}
+	// SetRelayProxy sets the HTTP proxy relays are reached through: a
+	// URL, relay.NoProxy, or empty for the system's.
+	SetRelayProxy struct{ Proxy string }
 	// StopServing stops, hanging up on every window connected.
 	StopServing struct{}
 	// DisconnectClients hangs up on the windows connected.
@@ -587,7 +592,7 @@ func (a *app) showServing() {
 	if a.settings != nil {
 		r := a.settings.Relay()
 		s.RelayOn, s.NoPort, s.RelayURL, s.Code = r.On, r.NoPort, r.URL, r.Code
-		s.RelayLast = a.settings.RelayLast()
+		s.RelayLast, s.Proxy = a.settings.RelayLast(), a.settings.Proxy()
 	}
 	if rl := a.serving.relay; rl != nil {
 		s.RelayURL, s.Code = rl.Relay().String(), rl.Code()
@@ -1222,7 +1227,34 @@ func (a *app) servedLast() StartServing {
 }
 
 // relayDialer is how this machine reaches a relay: through the HTTP
-// proxy the system names, if any.
+// proxy set, or the one the system names.
 func (a *app) relayDialer() relay.Dialer {
-	return relay.Dialer{Proxy: http.ProxyFromEnvironment}
+	set := ""
+	if a.settings != nil {
+		set = a.settings.Proxy()
+	}
+	pick, err := relay.Proxy(set)
+	if err != nil {
+		// Checked as it was set, so only a file edited by hand gets
+		// here: said, and the system's taken instead.
+		log.Printf("the proxy set for relays cannot be used, so the system's is: %v", err)
+		pick, _ = relay.Proxy("")
+	}
+	return relay.Dialer{Proxy: pick}
+}
+
+// setRelayProxy sets the HTTP proxy relays are reached through.
+func (a *app) setRelayProxy(proxy string) error {
+	proxy = strings.TrimSpace(proxy)
+	if _, err := relay.ParseProxy(proxy); err != nil {
+		return err
+	}
+	if a.settings == nil {
+		return errors.New("the settings could not be read, so the proxy cannot be kept")
+	}
+	if err := a.settings.PutProxy(proxy); err != nil {
+		return err
+	}
+	a.showServing()
+	return nil
 }

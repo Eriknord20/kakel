@@ -1193,6 +1193,8 @@ func failedTitle(in gunim.Intent) string {
 		return "Couldn't make a new code"
 	case CopyRelayLink:
 		return "Couldn't copy the link"
+	case SetRelayProxy:
+		return "Couldn't set the proxy"
 	case SharePane, UnsharePane, StopSharing:
 		return "Couldn't change what is shared"
 	case WriteSkill:
@@ -1516,6 +1518,8 @@ func (a *app) handle(in gunim.Intent) {
 		err = a.newRelayCode()
 	case CopyRelayLink:
 		err = a.copyRelayLink()
+	case SetRelayProxy:
+		err = a.setRelayProxy(in.Proxy)
 	case DisconnectClients:
 		err = a.disconnectClients()
 	case DisconnectClient:
