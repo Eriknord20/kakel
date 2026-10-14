@@ -11,6 +11,11 @@ change how something behaves.
 
 ### Changed
 
+**The tab bar shows with one tab too.** A window with a single tab used
+to show its title in place of the bar. Now the tab is there, so you can
+drag a lone pane by its tab onto another window, to join its tabs or
+dock beside one of its panes. The window it left closes.
+
 **Copies show as cards in the corner of Files.** The progress panel
 across the bottom is gone. Each copy, move or delete running now has a
 card over the bottom right corner, 360 px wide however wide the window.

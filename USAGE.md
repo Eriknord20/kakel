@@ -105,8 +105,7 @@ All Panes:
   split, on the side of it you let go nearest; the half it would take
   lights up.
 - onto the tab bar, and it leaves its split for a tab of its own, where
-  you let it go. With one tab, and no tab bar, let it go above the
-  panes.
+  you let it go.
 - outside every kakel window, and it opens a window of its own there.
 
 The Machines pane, the sidebar, has its own title and no line.

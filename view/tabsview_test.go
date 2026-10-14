@@ -65,10 +65,12 @@ func click(p geom.Point, b gi.Button) {
 	lastWindow.Frame(time.Second / 60)
 }
 
-// The bar shows with two tabs and names the panes in place of the title
-// bar; with one it goes, and the pane's title comes back. Each way, what
-// shows fades out before the title bar changes, and what comes fades in.
-func TestTheTabBarShowsWithTwoTabs(t *testing.T) {
+// The bar shows from the window's first tab and names the panes in
+// place of the title bar: what shows fades out before the title bar
+// changes, and what comes fades in. Its only tab stays on it, so a lone
+// pane can be dragged by it, and the last but one closing shrinks away
+// as any tab does.
+func TestTheTabBarShowsWithOneTab(t *testing.T) {
 	win, _, publish := windowStage(t)
 	b := win.tabs
 	frames := func(n int) {
@@ -76,32 +78,30 @@ func TestTheTabBarShowsWithTwoTabs(t *testing.T) {
 			lastWindow.Frame(time.Second / 60)
 		}
 	}
-	publish(twoTabs())
+	one := twoTabs()
+	one.Panes, one.Tabs = one.Panes[:1], one.Tabs[:1]
+	publish(one)
 	frames(2)
 	if b.shown() || b.titleFade.Value() >= 1 {
-		t.Fatalf("a frame after the second tab came, the bar shows %v and the title is %v there", b.shown(), b.titleFade.Value())
+		t.Fatalf("a frame after the first tab came, the bar shows %v and the title is %v there", b.shown(), b.titleFade.Value())
 	}
 	settle()
-	if !b.shown() || win.bar.Subtitle != "" || win.bar.Title != "" || b.fade.Value() != 1 {
-		t.Fatalf("with two tabs the bar shows %v, %v faded in, and the title bar says %q, %q", b.shown(), b.fade.Value(), win.bar.Title, win.bar.Subtitle)
+	if !b.shown() || win.bar.Subtitle != "" || win.bar.Title != "" || b.fade.Value() != 1 || len(b.boxes) != 1 {
+		t.Fatalf("with one tab the bar shows %v with %d tabs, %v faded in, and the title bar says %q, %q", b.shown(), len(b.boxes), b.fade.Value(), win.bar.Title, win.bar.Subtitle)
 	}
-	if b.front != 1 {
-		t.Fatalf("the tab in front is %d, want 1", b.front)
+	publish(twoTabs())
+	settle()
+	if !b.shown() || len(b.boxes) != 2 || b.front != 1 {
+		t.Fatalf("with two tabs the bar shows %v with %d tabs, %d in front", b.shown(), len(b.boxes), b.front)
 	}
-	st := twoTabs()
-	st.Panes, st.Tabs = st.Panes[:1], st.Tabs[:1]
-	publish(st)
+	publish(one)
 	frames(2)
-	if !b.shown() || b.fade.Value() >= 1 || b.fade.Value() <= 0 || len(b.gone) != 1 {
+	if !b.shown() || b.fade.Value() != 1 || len(b.gone) != 1 {
 		t.Fatalf("a frame after the second tab closed, the bar shows %v, %v faded, with %d tabs going", b.shown(), b.fade.Value(), len(b.gone))
 	}
-	frames(10)
-	if b.shown() || win.bar.Title != app.ProgramName || b.titleFade.Value() >= 1 {
-		t.Fatalf("once the bar has faded, it shows %v, and the title %q is %v there, want coming", b.shown(), win.bar.Title, b.titleFade.Value())
-	}
 	settle()
-	if b.shown() || win.bar.Subtitle != "Jobs" || win.bar.Title != app.ProgramName || b.titleFade.Value() != 1 {
-		t.Fatalf("with one tab the bar shows %v, the title bar says %q, %q, %v there", b.shown(), win.bar.Title, win.bar.Subtitle, b.titleFade.Value())
+	if !b.shown() || len(b.boxes) != 1 || len(b.gone) != 0 || win.bar.Subtitle != "" {
+		t.Fatalf("back to one tab the bar shows %v with %d tabs, %d going, the title bar says %q", b.shown(), len(b.boxes), len(b.gone), win.bar.Subtitle)
 	}
 }
 
@@ -203,8 +203,8 @@ func TestATabDroppedOnAPaneDocks(t *testing.T) {
 }
 
 // A tab carried away while its window drops to one tab still hears how
-// the drag ends, and the bar works when it shows again.
-func TestTheBarWorksAfterHidingMidDrag(t *testing.T) {
+// the drag ends, and the bar works when the tab comes back.
+func TestTheBarWorksAfterLosingTheTabMidDrag(t *testing.T) {
 	win, _, publish := windowStage(t)
 	publish(twoTabs())
 	drain()
@@ -218,13 +218,13 @@ func TestTheBarWorksAfterHidingMidDrag(t *testing.T) {
 	lastWindow.Input(gi.PointerUp{Pos: at.Add(geom.Pt(20, 30)), Button: gi.ButtonPrimary})
 	lastWindow.Frame(time.Second / 60)
 	if win.tabs.carried != 0 || win.tabs.pressed != -1 {
-		t.Fatalf("hidden, the bar still carries %d, pressed %d", win.tabs.carried, win.tabs.pressed)
+		t.Fatalf("its tab gone, the bar still carries %d, pressed %d", win.tabs.carried, win.tabs.pressed)
 	}
 	publish(twoTabs())
 	drain()
 	click(tabAt(t, win, 1), gi.ButtonPrimary)
 	if in := nextIntent(t); in != (app.ShowTab{Group: 2}) {
-		t.Fatalf("shown again, a click sent %#v", in)
+		t.Fatalf("the tab back, a click sent %#v", in)
 	}
 }
 

@@ -141,6 +141,25 @@ func TestAWindowLeftEmptyGoes(t *testing.T) {
 	}
 }
 
+// A window's only tab, dragged by its tab onto another window's bar or
+// beside one of its panes, moves there, and the window it left goes.
+func TestAWindowsOnlyTabMovesAndItsWindowGoes(t *testing.T) {
+	for _, dock := range []bool{false, true} {
+		a, one, two := twoWindowApp(t)
+		a.front(one)
+		g := a.groupOf["p3"]
+		if dock {
+			a.handle(DockTab{Group: g, Beside: "p1"})
+		} else {
+			a.handle(MoveTab{Group: g})
+		}
+		a.leaveEmpty()
+		if a.ownerOf("p3") != one || !two.gone || one.gone {
+			t.Fatalf("docking %v, p3 is in window %d, the window it left gone %v", dock, a.ownerOf("p3").id, two.gone)
+		}
+	}
+}
+
 // Closing a window with panes asks first, there, and closes them.
 func TestClosingAWindowAsksAndClosesItsPanes(t *testing.T) {
 	a, one, two := twoWindowApp(t)

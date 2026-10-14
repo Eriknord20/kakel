@@ -174,11 +174,12 @@ const (
 )
 
 // shown reports whether the bar has the title row's room and shows,
-// which it does with two tabs or more, and as the last but one fades.
+// which it does while the window has a tab, and as the last one fades.
 func (b *tabBar) shown() bool { return b.laid }
 
-// wanted reports whether the window has tabs to show: two or more.
-func (b *tabBar) wanted() bool { return len(b.tabs) > 1 }
+// wanted reports whether the window has tabs to show. Its only tab
+// shows too, so a lone pane can be dragged by it to another window.
+func (b *tabBar) wanted() bool { return len(b.tabs) > 0 }
 
 // show puts the window's tabs on the bar, and reports whether the tab
 // in front changed in a way the window shows in motion, and from which
@@ -319,9 +320,8 @@ func (b *tabBar) tabsMoved(tabs []app.Tab) {
 	in := func(tabs []app.Tab, g int) bool {
 		return slices.ContainsFunc(tabs, func(t app.Tab) bool { return t.Group == g })
 	}
-	if len(tabs) < 2 && len(b.tabs) < 2 {
-		// Hidden, it shows nothing moving. The last tab but one closing
-		// shrinks away as any tab does, as the bar fades.
+	if len(tabs) == 0 || len(b.tabs) == 0 {
+		// Coming or going, it shows nothing moving.
 		clear(b.moves)
 		clear(b.arriving)
 		b.gone, b.plusAt = nil, nil
@@ -990,7 +990,7 @@ func (w *Window) showTabs(st app.State, u *gunim.UI) {
 }
 
 // settleTitleRow moves the title row toward showing the tabs, when the
-// window has two or more, or else the window's title: it fades out
+// window has any, or else the window's title: it fades out
 // what shows, changes the row once that has gone, and fades in what it
 // changed to. Called as the tabs change and as the window lays out,
 // each step happens once the one before has finished.
@@ -1164,7 +1164,7 @@ func (w *Window) dockAt(p geom.Point, d app.TabDrag, u *gunim.UI) tabDock {
 			}
 		}
 		if own == "" {
-			// A tab of this window not on the bar: its only one.
+			// A tab of this window not on its bar yet.
 			return tabDock{}
 		}
 	}

@@ -83,8 +83,9 @@ The whole list. The [README](README.md) has the short version.
   machine, so a server on that machine's network is reached from
   anywhere the window is.
 - **Tabs.** Each window holds tabs, and each tab a pane or a split. New
-  Terminal opens one, and the tab bar shows in the title bar once there
-  are two. Click a tab to show it. Middle-click it, or click its ×, to
+  Terminal opens one, and the tab bar shows in the title bar, even
+  with only one tab, so a lone pane can be dragged by its tab to
+  another window. Click a tab to show it. Middle-click it, or click its ×, to
   close it. Ctrl+PageDown and Ctrl+PageUp go to the next and the
   previous tab, and Ctrl+Shift+PageDown and Ctrl+Shift+PageUp move the
   tab in front. Drag a tab along the bar to move it. Drag it onto
