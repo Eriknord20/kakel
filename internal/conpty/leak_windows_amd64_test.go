@@ -13,8 +13,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// openConsoles counts the OpenConsole processes running from where
-// kakel puts it.
+// openConsoles counts the OpenConsole processes this test binary
+// started, from where kakel puts it. That place is the user's cache,
+// shared with every other package's tests, which go test runs at the
+// same time, and which open panes there of their own.
 func openConsoles(t *testing.T) int {
 	t.Helper()
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
@@ -26,7 +28,7 @@ func openConsoles(t *testing.T) int {
 	e.Size = uint32(unsafe.Sizeof(e))
 	n := 0
 	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
-		if windows.UTF16ToString(e.ExeFile[:]) != "OpenConsole.exe" {
+		if e.ParentProcessID != uint32(os.Getpid()) || windows.UTF16ToString(e.ExeFile[:]) != "OpenConsole.exe" {
 			continue
 		}
 		h, oerr := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, e.ProcessID)
@@ -53,6 +55,10 @@ func TestAConsoleClosedUnderItsProgramEndsItsHost(t *testing.T) {
 	c, err := New(80, 24)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if n := openConsoles(t); n <= before {
+		_ = c.Close()
+		t.Fatalf("%d OpenConsole running with the console open, %d before", n, before)
 	}
 	cmd := `C:\Windows\System32\ping.exe`
 	p, err := c.Start(cmd, []string{cmd, "-n", "30", "127.0.0.1"}, "", os.Environ())
@@ -111,6 +117,10 @@ func TestAConsoleNeverUsedEndsItsHost(t *testing.T) {
 	c, err := New(80, 24)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if n := openConsoles(t); n <= before {
+		_ = c.Close()
+		t.Fatalf("%d OpenConsole running with the console open, %d before", n, before)
 	}
 	_ = c.Close()
 	deadline := time.Now().Add(5 * time.Second)

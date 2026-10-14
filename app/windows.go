@@ -524,11 +524,27 @@ func (a *app) openThrough(window machines.ID, key string, cmd command, id, title
 		on = machines.FarID(window, key)
 	}
 	a.starting++
+	// What the window calls it, and whether the pane is here yet: both
+	// read and written on the program's goroutine only. The name can
+	// come before the pane is added, as the session is handed back once
+	// the window takes the channel, so it waits for the pane then; bound
+	// to a pane not yet here, it was lost, and starting the pane again
+	// opened another shell there in place of the one it had.
+	var farID string
+	added := false
 	go func() {
 		// What the window calls it arrives on a goroutine of the
 		// connection's, and is written down on the program's.
 		named := func(n serve.Attached) {
-			go func() { a.events <- func() { a.bindFar(w, n.ID, id) } }()
+			go func() {
+				a.events <- func() {
+					if !added {
+						farID = n.ID
+						return
+					}
+					a.bindFar(w, n.ID, id)
+				}
+			}()
 		}
 		var sess session.Session
 		var err error
@@ -551,6 +567,8 @@ func (a *app) openThrough(window machines.ID, key string, cmd command, id, title
 				return
 			}
 			a.addPane(a.paneOn(on, Pane{ID: id, Title: title, Command: len(cmd.argv) > 0}), screen.Open(sess, a.palette, a.withLinks(a.hooks(id), id, on)), at)
+			added = true
+			a.bindFar(w, farID, id)
 			a.showWindows()
 			then(id, nil)
 		}

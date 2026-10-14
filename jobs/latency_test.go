@@ -23,6 +23,11 @@ type latent struct {
 	delay time.Duration
 	queue chan latentWrite
 	once  sync.Once
+
+	// mu guards on, the writes on their way, and most, the most there
+	// have been at once.
+	mu       sync.Mutex
+	on, most int
 }
 
 type latentWrite struct {
@@ -38,14 +43,28 @@ func newLatent(c net.Conn, delay time.Duration) *latent {
 			if _, err := l.Conn.Write(w.data); err != nil {
 				return
 			}
+			l.mu.Lock()
+			l.on--
+			l.mu.Unlock()
 		}
 	}()
 	return l
 }
 
 func (l *latent) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	l.on++
+	l.most = max(l.most, l.on)
+	l.mu.Unlock()
 	l.queue <- latentWrite{at: time.Now().Add(l.delay), data: bytes.Clone(p)}
 	return len(p), nil
+}
+
+// mostOn is the most writes there have been on their way at once.
+func (l *latent) mostOn() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.most
 }
 
 func (l *latent) Close() error {
@@ -72,12 +91,15 @@ func slowFar(t *testing.T, delay time.Duration) side {
 	f := vfs.NewSFTP("slow", client, client, client.Close)
 	t.Cleanup(func() { _ = f.Close() })
 	dir := t.TempDir()
-	return side{fs: f, at: filepath.ToSlash(dir), real: dir}
+	return side{fs: f, at: filepath.ToSlash(dir), real: dir, link: conn}
 }
 
 // A copy to or from a far server keeps many requests on their way, so
 // it is not held to one round trip per piece: 8 MB over a 20 ms round
-// trip, which one 64 KB piece at a time would take 2.6 s for.
+// trip, which one 64 KB piece at a time would take 2.6 s for. It counts
+// the requests on their way, not the time the copy took, which on a
+// busy test machine has gone past even 2.6 s. One piece at a time puts
+// no more than four writes on their way.
 func TestACopyOverALongRoundTripIsNotHeldToIt(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times a copy")
@@ -107,8 +129,10 @@ func TestACopyOverALongRoundTripIsNotHeldToIt(t *testing.T) {
 			if err != nil || !bytes.Equal(got, body) {
 				t.Fatalf("the copy holds %d bytes, %v", len(got), err)
 			}
-			if took > 1200*time.Millisecond {
-				t.Fatalf("8 MB took %v over a 20 ms round trip", took)
+			for _, s := range []side{from, to} {
+				if s.link != nil && s.link.mostOn() < 16 {
+					t.Fatalf("8 MB took %v, with at most %d writes on their way to a server", took, s.link.mostOn())
+				}
 			}
 			t.Logf("8 MB in %v", took)
 		})
