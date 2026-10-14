@@ -33,7 +33,8 @@ func TestACopyShowsOnTheJobsPaneUntilCleared(t *testing.T) {
 	a.ctx = t.Context()
 	local := vfs.NewLocal()
 	a.follow(jobs.Op{Kind: jobs.Copy, From: local, At: from, Names: []string{"a.txt"}, To: local, Into: into}, "Copying 1 item to x")
-	if len(a.st.Jobs) != 1 || a.st.Jobs[0].Title != "Copying 1 item to x" {
+	// A quick machine may have finished the copy already.
+	if len(a.st.Jobs) != 1 || a.st.Jobs[0].Title != "Copying 1 item to x" && a.st.Jobs[0].Title != "Copied 1 item to x" {
 		t.Fatalf("started, the jobs are %+v", a.st.Jobs)
 	}
 	waitFor(t, a, "the copy to finish", func() bool { return len(a.st.Jobs) == 1 && a.st.Jobs[0].Done })
