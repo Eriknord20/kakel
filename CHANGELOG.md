@@ -7,7 +7,7 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
-## Unreleased
+## v0.12.1-beta.2
 
 ### Added
 
@@ -73,6 +73,38 @@ off, as at first, only the servers connected there are reached.
 `kakel -relay-pipe` is the ProxyCommand that takes ssh through a relay.
 "Tunnels with ssh…" explains it, with the commands for this window to
 copy.
+
+**Walk into zips in the file manager again.** A zip opens as a folder,
+read in place rather than loaded into memory, so a large one on a
+server opens as fast as a small one. A zip with a password asks for it.
+Copy items out of a zip as out of any folder, to this machine or
+another.
+
+### Changed
+
+**The cursor's glide is a slider, and every animation has a speed.** In
+the theme editor, Cursor sets how long the cursor takes to glide, from
+Jumps up to a second. Motion › Animations sets how long all
+animations take, from off to five times as long. Save applies them to
+every window.
+
+**Error notices stay until you close them,** and their text can be
+selected and copied.
+
+### Fixed
+
+**No dark strip beside the menu button.** Once a second tab opened, the
+title bar showed a dark gap between the ☰ button and the first tab.
+
+**A terminal tab through a window keeps its machine in the title** when
+the tab is short of room, as "Windows PowerShell on XPS25" did not.
+
+**A folder opened from the desktop opens on the screen.** Its window
+opened beside the kakel window in front, past the edge of the screen
+when that window was near the edge or minimized.
+
+**Menus and popups stay inside their window** where the screen leaves
+room there.
 
 ## v0.12.1-beta.1
 
