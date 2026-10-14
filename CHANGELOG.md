@@ -7,6 +7,24 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## Unreleased
+
+### Changed
+
+**Disk usage: Show in Files opens a new tab,** on the item's folder with
+the item selected, and Disk usage stays as it was.
+
+**Disk usage can delete.** Delete moves the item selected to the trash,
+and Shift+Delete deletes it for good after asking. Right-click an item
+for Move to trash and Delete permanently. The sizes take it off at once.
+
+### Fixed
+
+**Disk usage scrolls the tree to the right row.** A box clicked deep
+down often scrolled the tree to the wrong place; its row now goes to
+the middle of the tree, clear of the shading at the top. A click on a
+row in the tree no longer scrolls it.
+
 ## v0.12.1-beta.2
 
 ### Added
