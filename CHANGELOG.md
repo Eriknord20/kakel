@@ -103,8 +103,8 @@ the tab is short of room, as "Windows PowerShell on XPS25" did not.
 opened beside the kakel window in front, past the edge of the screen
 when that window was near the edge or minimized.
 
-**Menus and popups stay inside their window** where the screen leaves
-room there.
+**A popup no longer hangs past the side of its window** when it fits
+in the window's width: it slides sideways to stay inside.
 
 ## v0.12.1-beta.1
 
