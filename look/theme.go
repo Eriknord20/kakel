@@ -209,6 +209,15 @@ func filesOf(pal vt.Palette, strong color.NRGBA) []theme.Entry {
 		theme.Set(filemanager.CloudLocalInk, ansi(2, 10)),
 		theme.Set(filemanager.CloudPinnedInk, nrgba(pal.ANSI[2])),
 		theme.Set(widget.MenubarFill, mix(bg, fg, 4)),
+		// Disk usage's colours for what a cloud provider keeps online,
+		// what it keeps here, and what is in no cloud, and its boxes.
+		theme.Set(filemanager.UsageOnline, ansi(4, 12)),
+		theme.Set(filemanager.UsageLocal, ansi(3, 11)),
+		theme.Set(filemanager.UsagePlain, mix(fg, bg, 45)),
+		theme.Set(filemanager.UsageTrack, alpha(fg, 0x14)),
+		theme.Set(filemanager.UsageBox, mix(bg, fg, 8)),
+		theme.Set(filemanager.UsageEdge, mix(bg, fg, 2)),
+		theme.Set(filemanager.UsageHot, alpha(fg, 0x40)),
 	}
 	for tint, c := range map[filemanager.Tint]color.NRGBA{
 		filemanager.TintOther:    mix(fg, bg, 40),
