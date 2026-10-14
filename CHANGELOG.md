@@ -22,7 +22,8 @@ counted apart: what is only online, what is on this device and could be
 freed, and what is always kept here. The boxes can be sized by what is
 on this device or by what is online, and coloured by cloud, to find the
 folders that hold the most offline files. Show in Files takes you to an
-item in the file list.
+item in the file list. On Windows, right-click an item in a OneDrive
+folder for Free up space or Always keep on this device, as in Explorer.
 
 **The file manager's filter can look in the folders under this one.**
 Click the button beside the filter field, or pick Go › Filter
