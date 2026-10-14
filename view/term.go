@@ -202,6 +202,8 @@ func newTerm(id string, sh *screen.Shell, keys *ui.Keymap) *term {
 	g.Background = look.TermBackground
 	t := &term{id: id, keys: keys, sh: sh, cells: g, settle: anim.NewFloat(0)}
 	t.dropLit = anim.NewFloat(0)
+	// settle counts real time, whatever pace the theme sets.
+	t.settle.RealTime()
 	t.Add(t.settle, t.dropLit)
 	// The whole screen, not just the rows changed since the last pane
 	// drew it: this one may be in a window the pane has just moved to.

@@ -1,10 +1,12 @@
 package view
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/themeedit"
 	"github.com/marrasen/gunim/widget"
 
@@ -39,6 +41,9 @@ func TestTheThemeEditorKeepsACursorThatJumps(t *testing.T) {
 	ed := win.themeEditor.ed
 	if chosen := ed.Chosen(); len(chosen) == 0 || chosen[0] != widget.Caret.Key() {
 		t.Fatalf("the editor puts %v first, want the cursor", chosen)
+	}
+	if chosen := ed.Chosen(); !slices.Contains(chosen, theme.Scale.Key()) {
+		t.Fatalf("the editor has no Animations: %v", chosen)
 	}
 	drain := func() (saved []app.SaveThemeEdits) {
 		for len(lastWindow.Client().Intents()) > 0 {
@@ -80,5 +85,17 @@ func TestTheThemeEditorKeepsACursorThatJumps(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+// The cursor is a slider for how long it glides, from a jump up to a
+// whole second.
+func TestTheThemeEditorsCursorIsASlider(t *testing.T) {
+	f := themeSections()[0].Fields[0]
+	if f.Key != widget.Caret.Key() || f.Min != 0 || f.Max != 1 {
+		t.Fatalf("the cursor is %+v", f)
+	}
+	if def := widget.Caret.Default().Response; def <= f.Min || def >= f.Max {
+		t.Fatalf("the cursor's own glide, %v, is off the slider", def)
 	}
 }
