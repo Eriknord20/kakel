@@ -177,8 +177,9 @@ func (a *app) openFilePaneLike(o filemanager.Options) {
 	if fsys == nil {
 		fsys = filemanager.LocalFS()
 	}
-	// The file manager asks for a place it shows, as a zip it opens.
-	if err := a.filePaneAt(machineOfFS(fsys.ID()), fsys, o.Dir, "", Placement{}); err != nil {
+	// The file manager asks for a place it shows, as a zip it opens, with
+	// the item it names selected, as Disk usage's Show in Files does.
+	if err := a.filePaneAt(machineOfFS(fsys.ID()), fsys, o.Dir, o.Select, Placement{}); err != nil {
 		a.failed("Couldn't open the files", err.Error())
 	}
 }

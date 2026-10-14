@@ -278,3 +278,21 @@ func TestAFileManagerWindowOpensWhereTheLastOneClosed(t *testing.T) {
 		t.Fatalf("one opened over another at %v, not a step down and right", p)
 	}
 }
+
+// A file manager that opens another, as Disk usage's Show in Files does,
+// opens it in a pane of its own with the item it names selected.
+func TestAnotherFileManagerOpensWithItsItemSelected(t *testing.T) {
+	a, _ := agentApp(t)
+	a.settings = mustSettings(t)
+	files := newFakeFiles(t)
+	a.files = files
+	dir := t.TempDir()
+	panes := len(a.st.Panes)
+	a.openFilePaneLike(filemanager.Options{FS: filemanager.LocalFS(), Dir: dir, Select: "notes.md"})
+	if len(files.opened) != 1 || len(a.st.Panes) != panes+1 {
+		t.Fatalf("it opened %d file managers and %d panes", len(files.opened), len(a.st.Panes)-panes)
+	}
+	if o := files.opened[0]; o.Dir != dir || o.Select != "notes.md" {
+		t.Errorf("it opened %s with %q selected", o.Dir, o.Select)
+	}
+}
