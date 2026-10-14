@@ -7,7 +7,7 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
-## Unreleased
+## v0.12.1-beta.3
 
 ### Changed
 
@@ -38,6 +38,11 @@ for Move to trash and Delete permanently. The sizes take it off at once.
 down often scrolled the tree to the wrong place; its row now goes to
 the middle of the tree, clear of the shading at the top. A click on a
 row in the tree no longer scrolls it.
+
+**A pane opened through another kakel window keeps its tie to it.**
+When the other window named the pane before it arrived here, the name
+was lost. Starting the pane again then opened a second shell on the
+server instead of restarting the one that ended.
 
 ## v0.12.1-beta.2
 
