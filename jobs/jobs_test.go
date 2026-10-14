@@ -42,6 +42,9 @@ type side struct {
 	fs   vfs.FS
 	at   string
 	real string
+	// link is the connection to a far server slowed to a round trip,
+	// and nil for any other side.
+	link *latent
 }
 
 // local returns a directory on this machine.
