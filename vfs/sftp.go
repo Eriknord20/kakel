@@ -6,6 +6,8 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -426,6 +428,46 @@ func (s *SFTP) RealPath(path string) (string, error) {
 func (s *SFTP) Chtimes(path string, mod time.Time) error {
 	path = Spelled(s, path)
 	return wrap(s, "set the time on", path, s.client.Chtimes(path, mod, mod))
+}
+
+// CanKeepOnDevice reports whether the machine tells its cloud provider
+// which items to keep on its device, as a kakel window on Windows does
+// for OneDrive: its server names winattrs.KeepName among its extensions.
+func (s *SFTP) CanKeepOnDevice() bool {
+	_, ok := s.client.HasExtension(winattrs.KeepName)
+	return ok
+}
+
+// KeepOnDevice has the machine's cloud provider keep the item at path,
+// and all a folder holds, on its device with keep, or free their space
+// without, as Explorer's Always keep on this device and Free up space
+// do. A machine that cannot fails with an error that matches
+// errors.ErrUnsupported. Once asked, the machine carries on to the end:
+// SFTP has no way to call a request off.
+func (s *SFTP) KeepOnDevice(path string, keep bool) error {
+	if !s.CanKeepOnDevice() {
+		return errors.ErrUnsupported
+	}
+	path = Spelled(s, path)
+	v := "0"
+	if keep {
+		v = "1"
+	}
+	err := s.client.SetExtendedData(path, []sftp.StatExtended{{ExtType: winattrs.KeepName, ExtData: v}})
+	var se *sftp.StatusError
+	if errors.As(err, &se) {
+		// The serving kakel's own words, not SFTP's wrapping of them.
+		if se.FxCode() == sftp.ErrSSHFxOpUnsupported {
+			return errors.ErrUnsupported
+		}
+		msg := se.Error()
+		if i, j := strings.IndexByte(msg, '"'), strings.LastIndexByte(msg, '"'); i >= 0 && j > i {
+			if words, uerr := strconv.Unquote(msg[i : j+1]); uerr == nil && words != "" {
+				return fmt.Errorf("%s: %s", s.Name(), words)
+			}
+		}
+	}
+	return wrap(s, "tell the cloud provider about", path, err)
 }
 
 // Space is how many bytes are free and in all on the volume that holds

@@ -24,6 +24,8 @@ on this device or by what is online, and coloured by cloud, to find the
 folders that hold the most offline files. Show in Files takes you to an
 item in the file list. On Windows, right-click an item in a OneDrive
 folder for Free up space or Always keep on this device, as in Explorer.
+The same works for a Windows machine's files through a kakel window
+there, once that machine runs this kakel too.
 
 **The file manager's filter can look in the folders under this one.**
 Click the button beside the filter field, or pick Go › Filter

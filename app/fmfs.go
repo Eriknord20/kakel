@@ -116,6 +116,10 @@ type (
 	spacer interface {
 		Space(path string) (free, total uint64, err error)
 	}
+	keeper interface {
+		CanKeepOnDevice() bool
+		KeepOnDevice(path string, keep bool) error
+	}
 	newCreator interface {
 		CreateNew(path string, mode fs.FileMode) (io.WriteCloser, error)
 	}
@@ -507,6 +511,35 @@ func (m *fmFS) Cloud(_ string, info fs.FileInfo) filemanager.CloudState {
 		attrs = vfs.WinAttrs(info)
 	}
 	return filemanager.WindowsCloud(attrs&^winattrs.InCloud, info.IsDir(), attrs&winattrs.InCloud != 0)
+}
+
+// CanKeepOnDevice implements [filemanager.CloudKeeper]: a kakel window
+// on Windows tells its cloud provider which items to keep on its device.
+func (m *fmFS) CanKeepOnDevice() bool {
+	f, err := m.files()
+	if err != nil {
+		return false
+	}
+	k, ok := f.(keeper)
+	return ok && k.CanKeepOnDevice()
+}
+
+// KeepOnDevice implements [filemanager.CloudKeeper], where the machine
+// can. ctx stops it only before it asks: the machine carries on once
+// asked, though ctx ends, as SFTP has no way to call a request off.
+func (m *fmFS) KeepOnDevice(ctx context.Context, path string, keep bool) error {
+	f, err := m.files()
+	if err != nil {
+		return err
+	}
+	k, ok := f.(keeper)
+	if !ok {
+		return errors.ErrUnsupported
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return k.KeepOnDevice(path, keep)
 }
 
 // SystemThumb implements [filemanager.OnlineReporter]: the thumbnails

@@ -1,6 +1,8 @@
 package winattrs
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -10,7 +12,18 @@ import (
 	"github.com/marrasen/gunim/filemanager"
 )
 
-func init() { Lookup, Space = lookup, space }
+func init() { Lookup, Space, Keep = lookup, space, keep }
+
+// keep has the cloud provider keep the item at the SFTP path p on this
+// device, or free its space, as Explorer does.
+func keep(ctx context.Context, home, p string, on bool) error {
+	full := filepath.FromSlash(Resolve(filepath.ToSlash(home), p))
+	k, ok := filemanager.LocalFS().(filemanager.CloudKeeper)
+	if !ok {
+		return errors.ErrUnsupported
+	}
+	return k.KeepOnDevice(ctx, full, on)
+}
 
 // lookup reads the attributes of the item at the SFTP path p, as os
 // reads them, long paths included, and without reading the item, which
