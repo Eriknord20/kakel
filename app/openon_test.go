@@ -392,9 +392,14 @@ func TestAnAgentWorksInPanesThroughAWindow(t *testing.T) {
 	if err != nil || opened.Label != "srv 2 on srv through "+name {
 		t.Fatalf("opened %+v, %v", opened, err)
 	}
-	if p := b.st.Panes[len(b.st.Panes)-1]; p.On != "srv" || !slices.ContainsFunc(a.st.Panes, func(q Pane) bool { return q.Machine == "srv" && q.ID != a.st.Panes[2].ID }) {
-		t.Fatalf("the new pane is %+v here, and there are %+v", p, a.st.Panes)
+	if p := b.st.Panes[len(b.st.Panes)-1]; p.On != "srv" {
+		t.Fatalf("the new pane is %+v here", p)
 	}
+	// The window takes the channel for it before it opens the shell, so
+	// the pane can be here a moment before it is there.
+	pumpBoth(t, a, b, "the new pane on the window", func() bool {
+		return slices.ContainsFunc(a.st.Panes, func(q Pane) bool { return q.Machine == "srv" && q.ID != a.st.Panes[2].ID })
+	})
 	// The window's own pane is the other one shared. Its name is the
 	// title its shell gave, once that has come: cmd.exe names itself by
 	// its path, as it starts.
@@ -435,8 +440,12 @@ func TestAnAgentWorksInPanesThroughAWindow(t *testing.T) {
 	if err != nil || opened.Label != name+" 2 on "+name {
 		t.Fatalf("opened on the window %+v, %v", opened, err)
 	}
-	if p := b.st.Panes[len(b.st.Panes)-1]; p.Machine != win || p.On != "" || len(a.st.Panes) != there+1 || a.st.Panes[there].Machine != machines.Local {
-		t.Fatalf("the new pane is %+v here, and there %+v", p, a.st.Panes)
+	if p := b.st.Panes[len(b.st.Panes)-1]; p.Machine != win || p.On != "" {
+		t.Fatalf("the new pane is %+v here", p)
+	}
+	pumpBoth(t, a, b, "the new pane on the window's machine", func() bool { return len(a.st.Panes) > there })
+	if len(a.st.Panes) != there+1 || a.st.Panes[there].Machine != machines.Local {
+		t.Fatalf("the window's panes are %+v", a.st.Panes)
 	}
 
 	// The window let go of the server: an agent's restart is refused
