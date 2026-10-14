@@ -11,6 +11,15 @@ change how something behaves.
 
 ### Changed
 
+**Copies show as cards in the corner of Files.** The progress panel
+across the bottom is gone. Each copy, move or delete running now has a
+card over the bottom right corner, 360 px wide however wide the window.
+It shows the speed, the time left, and a graph of the speed across how
+far the copy has got. Pause holds a copy and Resume carries it on. The
+chevron folds a card to one line with a progress ring; a third copy
+starting folds the oldest. The progress moves evenly rather than in
+jumps, and the graph and the words show the same speed.
+
 **Disk usage: Show in Files opens a new tab,** on the item's folder with
 the item selected, and Disk usage stays as it was.
 
