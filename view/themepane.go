@@ -29,8 +29,9 @@ type themePane struct {
 func themeSections() []themeedit.Section {
 	return []themeedit.Section{
 		{Title: "Terminal", Fields: []themeedit.Field{{
-			Key: widget.Caret.Key(), Label: "Cursor", Detail: "How a terminal's cursor moves along a line.",
-			Presets: []themeedit.Preset{{Label: "Glides", Value: widget.Caret.Default()}, {Label: "Jumps", Value: themeedit.Instant}},
+			Key: widget.Caret.Key(), Label: "Cursor", Detail: "How long a terminal's cursor takes to glide along a line.",
+			Min: 0, Max: 1,
+			Presets: []themeedit.Preset{{Label: "Jumps", Value: themeedit.Instant}, {Label: "Glides", Value: widget.Caret.Default()}},
 		}}},
 		{Title: "Motion", Fields: []themeedit.Field{
 			{Key: widget.Quick.Key(), Label: "Quick moves", Detail: "Buttons, switches and highlights as they answer the pointer."},
