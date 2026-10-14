@@ -8,9 +8,15 @@
 // stat, under Name, where any is set. The connected kakel finds them in
 // the replies as they come, so the status of a folder's files costs no
 // request of its own. An ordinary SFTP server sends none.
+//
+// The proxy also tells the cloud provider which items to keep on the
+// device, as Explorer's Free up space and Always keep on this device do,
+// where the connected kakel sets KeepName on an item; it says it can in
+// the server's version reply, as an extension of that name.
 package winattrs
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -38,6 +44,12 @@ const (
 	cloud   = Offline | Pinned | Unpinned | RecallOnOpen | RecallOnDataAccess | InCloud
 )
 
+// KeepName is the extended attribute the connected kakel sets on an item
+// to have the cloud provider keep it, and all a folder holds, on the
+// device, with "1", or free their space, with "0". The proxy answers it
+// itself, and names it among the server's extensions where it can.
+const KeepName = "kakel-keep@kakel"
+
 // OnlineOnly reports whether attrs say the file's contents are kept
 // online only, so reading it downloads it.
 func OnlineOnly(attrs uint32) bool {
@@ -63,6 +75,12 @@ var Lookup func(home, p string, follow bool) (uint32, bool)
 // a relative path starts in.
 var Space func(home, p string) (free, total uint64, ok bool)
 
+// Keep has the cloud provider keep the item at the SFTP path p, and all
+// a folder holds, on the device with keep, or free their space without,
+// until ctx ends; nil where the system has no cloud provider to tell.
+// home is the folder a relative path starts in.
+var Keep func(ctx context.Context, home, p string, keep bool) error
+
 // statvfs is OpenSSH's extension asking for a volume's space, which Go's
 // SFTP server can't answer on Windows.
 const statvfs = "statvfs@openssh.com"
@@ -72,6 +90,8 @@ const (
 	fxpExtended      = 200
 	fxpExtendedReply = 201
 	fxpInit          = 1
+	fxpVersion       = 2
+	fxpSetstat       = 9
 	fxpLstat         = 7
 	fxpOpendir       = 11
 	fxpReaddir       = 12
@@ -86,6 +106,10 @@ const (
 	attrPerms        = 0x4
 	attrTimes        = 0x8
 	attrExtends      = 0x80000000
+	// The codes of a status reply.
+	fxOK          = 0
+	fxFailure     = 4
+	fxUnsupported = 8
 	// maxPacket is the longest packet read, as pkg/sftp takes.
 	maxPacket = 1 << 18
 )
@@ -100,15 +124,21 @@ const (
 // replies to requests by their IDs, in whatever order they come.
 //
 // With space, it answers OpenSSH's statvfs itself, from it, in place of
-// the server.
+// the server. With keep, it sets KeepName itself, by it, and names it
+// among the server's extensions.
 func Proxy(conn io.ReadWriteCloser, home string, lookup func(home, p string, follow bool) (uint32, bool),
-	space func(home, p string) (free, total uint64, ok bool)) io.ReadWriteCloser {
+	space func(home, p string) (free, total uint64, ok bool),
+	keep func(ctx context.Context, home, p string, keep bool) error) io.ReadWriteCloser {
 	toServer, fromConn := io.Pipe()
 	toConn, fromServer := io.Pipe()
-	p := &proxy{home: home, lookup: lookup, space: space, conn: conn, dirs: map[string]string{}, opening: map[uint32]string{},
-		reading: map[uint32]string{}, stating: map[uint32]stat{}, busy: make(chan struct{}, 4)}
+	ctx, cancel := context.WithCancel(context.Background())
+	p := &proxy{home: home, lookup: lookup, space: space, keep: keep, ctx: ctx, conn: conn, dirs: map[string]string{},
+		opening: map[uint32]string{}, reading: map[uint32]string{}, stating: map[uint32]stat{}, busy: make(chan struct{}, 4),
+		keeping: make(chan struct{}, mostKeeping)}
 	go func() {
 		err := p.requests(conn, fromConn)
+		// What it was asked to keep or free stops with the connection.
+		cancel()
 		_ = fromConn.CloseWithError(err)
 	}()
 	go func() {
@@ -116,6 +146,7 @@ func Proxy(conn io.ReadWriteCloser, home string, lookup func(home, p string, fol
 		_ = toConn.CloseWithError(err)
 	}()
 	return &end{Reader: toServer, Writer: fromServer, close: func() error {
+		cancel()
 		_ = toServer.Close()
 		_ = fromServer.Close()
 		return conn.Close()
@@ -135,6 +166,11 @@ type proxy struct {
 	home   string
 	lookup func(home, p string, follow bool) (uint32, bool)
 	space  func(home, p string) (free, total uint64, ok bool)
+	keep   func(ctx context.Context, home, p string, keep bool) error
+	// ctx ends with the connection, and with it what keep does; keeping
+	// bounds how many items are kept or freed at once.
+	ctx     context.Context
+	keeping chan struct{}
 	// conn is where the proxy answers what it answers itself.
 	conn io.Writer
 	mu   sync.Mutex
@@ -163,11 +199,11 @@ func (p *proxy) requests(from io.Reader, to io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if p.keeps(pkt) {
+			continue
+		}
 		if reply, ok := p.answer(pkt); ok {
-			p.wmu.Lock()
-			_, err := p.conn.Write(reply)
-			p.wmu.Unlock()
-			if err != nil {
+			if err := p.reply(reply); err != nil {
 				return err
 			}
 			continue
@@ -194,6 +230,9 @@ func (p *proxy) replies(from io.Reader, to io.Writer) error {
 		pkt, err := readPacket(from)
 		if err != nil {
 			return err
+		}
+		if pkt[4] == fxpVersion && p.keep != nil {
+			pkt = appendExtension(pkt, KeepName, "1")
 		}
 		rewrite := p.claim(pkt)
 		if rewrite == nil {
@@ -260,6 +299,93 @@ func (p *proxy) answer(pkt []byte) ([]byte, bool) {
 		out = binary.BigEndian.AppendUint64(out, v)
 	}
 	return packet(out), true
+}
+
+// mostKeeping is how many items the proxy keeps or frees at once: each
+// walks all a folder holds. One more is refused.
+const mostKeeping = 2
+
+// reply writes a reply the proxy makes itself to the connection.
+func (p *proxy) reply(pkt []byte) error {
+	p.wmu.Lock()
+	defer p.wmu.Unlock()
+	_, err := p.conn.Write(pkt)
+	return err
+}
+
+// keeps takes a request that sets KeepName on an item, and nothing else:
+// it has the cloud provider keep the item on the device, or free it, on a
+// goroutine of its own, as that may take a while, and answers once done.
+// It reports whether the request was one.
+func (p *proxy) keeps(pkt []byte) bool {
+	b := pkt[4:]
+	if p.keep == nil || len(b) < 5 || b[0] != fxpSetstat {
+		return false
+	}
+	id := binary.BigEndian.Uint32(b[1:5])
+	at, rest, ok := str(b[5:])
+	if !ok || len(rest) < 8 || binary.BigEndian.Uint32(rest) != attrExtends {
+		return false
+	}
+	count := binary.BigEndian.Uint32(rest[4:])
+	rest = rest[8:]
+	value := ""
+	for range count {
+		k, after, ok := str(rest)
+		if !ok {
+			return false
+		}
+		v, after2, ok := str(after)
+		if !ok {
+			return false
+		}
+		if k == KeepName {
+			value = v
+		}
+		rest = after2
+	}
+	if value != "0" && value != "1" || count != 1 {
+		return false
+	}
+	select {
+	case p.keeping <- struct{}{}:
+	default:
+		go func() { _ = p.reply(status(id, fxFailure, "busy with others; try again once they are done")) }()
+		return true
+	}
+	go func() {
+		defer func() { <-p.keeping }()
+		err := p.keep(p.ctx, p.home, at, value == "1")
+		code, msg := uint32(fxOK), ""
+		switch {
+		case errors.Is(err, errors.ErrUnsupported):
+			code, msg = fxUnsupported, err.Error()
+		case err != nil:
+			code, msg = fxFailure, err.Error()
+		}
+		// A connection gone has no one to tell.
+		_ = p.reply(status(id, code, msg))
+	}()
+	return true
+}
+
+// status is a status reply to request id.
+func status(id, code uint32, msg string) []byte {
+	out := []byte{fxpStatus}
+	out = binary.BigEndian.AppendUint32(out, id)
+	out = binary.BigEndian.AppendUint32(out, code)
+	out = appendStr(out, msg)
+	out = appendStr(out, "")
+	return packet(out)
+}
+
+// appendExtension is the server's version reply pkt naming the extension
+// name too, with data.
+func appendExtension(pkt []byte, name, data string) []byte {
+	out := slices.Clone(pkt[4:])
+	out = appendStr(out, name)
+	out = appendStr(out, data)
+	return packet(out)
 }
 
 // note notes what a request is about.
