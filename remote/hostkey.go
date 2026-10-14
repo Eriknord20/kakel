@@ -79,7 +79,7 @@ func (h *hostKeys) callback(ctx context.Context, ask Ask) ssh.HostKeyCallback {
 			return askErr
 		}
 		if !ok {
-			return fmt.Errorf("the host key for %s was not accepted", hostname)
+			return keyRefused(hostname)
 		}
 		return h.record(hostname, key)
 	}
@@ -301,3 +301,14 @@ func hostKeyCheck(ctx context.Context, paths []string, ask Ask) (ssh.HostKeyCall
 	}
 	return keys.callback(ctx, ask), nil
 }
+
+// ErrHostKeyRefused is what a connection fails with when the user said
+// no to trusting a machine's host key.
+var ErrHostKeyRefused = errors.New("the host key was not accepted")
+
+// keyRefused says the host key of a machine was not accepted, and is
+// ErrHostKeyRefused.
+type keyRefused string
+
+func (k keyRefused) Error() string        { return "the host key for " + string(k) + " was not accepted" }
+func (k keyRefused) Is(target error) bool { return target == ErrHostKeyRefused }

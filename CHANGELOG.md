@@ -19,6 +19,45 @@ an item and pick Go to its folder to open the folder it is in, with
 the item selected. The search stops at 200,000 items or 30 seconds, and
 the status bar says when it did.
 
+**A relay, for windows that cannot reach each other.** `kakel -relay`
+runs on a server with no screen and joins a served window and a window
+connecting to it, over WebSockets on HTTPS. It gets a certificate from
+Let's Encrypt with `-domain`, or runs on plain HTTP behind nginx or
+Caddy. Its URL holds a secret, and it answers nothing without it.
+
+**Serve a window through a relay.** The Serve dialog can serve through
+a relay as well as on a port, or instead. Kakel makes a code to type at
+the other end and keeps it from one run to the next. Copy Link and New
+Code are in the served dialog, which says whether the relay is reached.
+Kakel reaches the relay again by itself when the network comes back.
+
+**Connect to a window through a relay.** Connect to Window takes a
+relay's URL and a code, or the copied link pasted whole. A kakel window
+in the server list can be one served through a relay, with its code.
+
+**Relays through HTTP proxies.** Kakel reaches a relay through the
+proxy `HTTPS_PROXY` names or, on Windows, the system's proxy. Settings ›
+Sharing › Relays › Proxy overrides both, or says none.
+
+**Windows and relays through a saved server.** Serving through a relay,
+connecting to a window, and a saved kakel window can go through a saved
+server, as servers behind a jump host do.
+
+**Servers through a kakel window.** A saved server's Through can be a
+saved kakel window, served directly or through a relay. Kakel connects
+to the window first, and the window opens the stream to the server from
+its own machine.
+
+**Tunnels with plain ssh.** A served window takes `ssh -N -L`, `-J`
+and `-W` with the keys it allows. The user name says where the tunnel
+goes out from: `kakel@` for the served machine, or a machine saved
+there by name. With Settings › Sharing › Tunnels may connect on, a
+saved server is connected to on the way when that needs nothing asked;
+off, as at first, only the servers connected there are reached.
+`kakel -relay-pipe` is the ProxyCommand that takes ssh through a relay.
+"Tunnels with ssh…" explains it, with the commands for this window to
+copy.
+
 ## v0.12.1-beta.1
 
 ### Fixed

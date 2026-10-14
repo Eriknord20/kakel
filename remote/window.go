@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"time"
 
 	"golang.org/x/crypto/ssh/agent"
@@ -13,9 +14,17 @@ import (
 
 // Reach is everything reaching another kakel window needs.
 type Reach struct {
+	// Addr is where the window serves, which its host key is kept
+	// under, and KeyFile the key to offer it.
 	Addr, KeyFile string
-	Ring          *Ring
-	Ask           Ask
+	// Through makes the connection the window is reached over, in place
+	// of a TCP connection to Addr: a stream through a relay, or through
+	// a jump server. A nil one dials Addr from this machine.
+	Through func(ctx context.Context) (net.Conn, error)
+	// Shown is what to call the window, when Addr is not it.
+	Shown string
+	Ring  *Ring
+	Ask   Ask
 
 	// Known says where the windows already reached are recorded. Given
 	// rather than looked up, so a test can hand over a file of its own.
@@ -127,13 +136,17 @@ func (r Reach) reach(ctx context.Context) (win *serve.Window, err error) {
 		return nil, noKeysToOffer(a.agentTrouble())
 	}
 
-	check, err := hostKeyCheck(ctx, []string{known}, r.Ask)
+	asking := r.Ask
+	if r.Shown != "" {
+		asking = shownAsk{Ask: r.Ask, shown: r.Shown}
+	}
+	check, err := hostKeyCheck(ctx, []string{known}, asking)
 	if err != nil {
 		return nil, err
 	}
 	r.say(stepConnect)
 	win, err = serve.Dial(ctx, serve.DialConfig{
-		Addr: r.Addr, Auth: a.next, HostKey: check, Patience: r.Patience,
+		Addr: r.Addr, Reach: r.Through, Shown: r.Shown, Auth: a.next, HostKey: check, Patience: r.Patience,
 		Saying: r.Saying,
 	})
 	if err != nil {
@@ -168,4 +181,16 @@ func (r Reach) ladder(ctx context.Context) (*auth, error) {
 		cfg.NoAgent, cfg.NoRing = true, true
 	}
 	return authMethods(ctx, cfg)
+}
+
+// shownAsk asks about a host key under the name the window is shown by,
+// rather than the one its key is kept under.
+type shownAsk struct {
+	Ask
+	shown string
+}
+
+func (s shownAsk) TrustHostKey(ctx context.Context, k HostKey) (bool, error) {
+	k.Shown = s.shown
+	return s.Ask.TrustHostKey(ctx, k)
 }

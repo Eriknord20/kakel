@@ -17,6 +17,7 @@ import (
 	"github.com/marrasen/kakel/conf"
 	"github.com/marrasen/kakel/keys"
 	"github.com/marrasen/kakel/look"
+	"github.com/marrasen/kakel/relay"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/serve"
 	"github.com/marrasen/kakel/settings"
@@ -94,10 +95,12 @@ type settingsPane struct {
 
 	// Terminal.
 	startIn, termProgram *savedLine
-	shell                *widget.Dropdown
-	shellIDs             []string
-	known                *widget.Dropdown
-	pasteCheck           *widget.Switch
+	// proxy is the HTTP proxy relays are reached through.
+	proxy      *savedLine
+	shell      *widget.Dropdown
+	shellIDs   []string
+	known      *widget.Dropdown
+	pasteCheck *widget.Switch
 
 	// Notifications.
 	iface         *widget.Checkbox
@@ -105,6 +108,8 @@ type settingsPane struct {
 
 	// Sharing.
 	atStart *widget.Segmented
+	// tunnels lets plain ssh's tunnels connect machines here.
+	tunnels *widget.Switch
 	port    *widget.NumberField
 	reach   *widget.Dropdown
 	keys    *widget.Label
@@ -459,6 +464,8 @@ func (p *settingsPane) sharing() gunim.Node {
 	for i, c := range serveAtStart {
 		titles[i] = c.title
 	}
+	p.tunnels = widget.NewSwitch("")
+	p.tunnels.OnChange = func(on bool, u *gunim.UI) gunim.Intent { p.send(app.SetTunnelsConnect{On: on}, u); return nil }
 	p.atStart = widget.NewSegmented(titles...)
 	p.atStart.OnChange = func(i int, u *gunim.UI) gunim.Intent {
 		return app.SetServeAtStart{When: serveAtStart[max(0, min(i, len(serveAtStart)-1))].value}
@@ -475,6 +482,12 @@ func (p *settingsPane) sharing() gunim.Node {
 		p.send(app.SetServeDefaults{Port: int(p.port.Value()), Anywhere: i == 1}, u)
 		return nil
 	}
+	p.proxy = p.newSavedLine("the system's", 280, func(s string) string {
+		if _, err := relay.ParseProxy(s); err != nil {
+			return words.UpperFirst(err.Error()) + "."
+		}
+		return ""
+	}, func(s string) gunim.Intent { return app.SetRelayProxy{Proxy: s} })
 	p.keys = widget.NewLabel("")
 	add := widget.NewButton("Add Key…")
 	add.OnClick = func(u *gunim.UI) gunim.Intent { p.w.addKeyDialogFrom(p.st.Serving, false, u); return nil }
@@ -495,10 +508,16 @@ func (p *settingsPane) sharing() gunim.Node {
 			settingRow("Now", "", p.serving),
 			settingRow("When kakel starts", "If the window was served as kakel last closed.", p.atStart),
 			settingRow("Port", "0 picks a free port.", widget.NewSized(p.port, 110, 0)),
-			settingRow("Listen on", "", p.reach)),
+			settingRow("Listen on", "", p.reach),
+			settingRow("Tunnels with ssh", "Plain ssh on another machine can make tunnels through a served window.", p.settingButton("How…", "serve.ssh")),
+			settingRow("Tunnels may connect", "A tunnel through a saved server not connected here connects it, when that needs nothing asked, and one may go through a kakel window connected here. Off, tunnels reach only the servers connected here, as a kakel window connecting does.", p.tunnels)),
 		settingsSection("Keys that may connect",
 			p.keys,
 			buttons(add, p.removeK)),
+		settingsSection("Relays",
+			faintLabel("A relay joins two windows that cannot reach each other: run kakel -relay on a server, then serve or connect through it."),
+			settingRow("Proxy", "Empty uses HTTPS_PROXY or, on Windows, the system's proxy; none goes straight to the relay. A PAC script or a Windows (NTLM) proxy login is not supported.",
+				p.proxy.node)),
 	)
 }
 
@@ -554,6 +573,7 @@ func (p *settingsPane) show(st app.State, u *gunim.UI) {
 	setOn(p.autostart, st.Update.Autostart)
 	p.autostart.Disabled = !st.Update.Installed
 	setOn(p.tray, st.InTray)
+	setOn(p.tunnels, st.Serving.TunnelsConnect)
 	setOn(p.folders, st.Update.Folders)
 	p.folders.Disabled = !st.Update.Installed
 	p.installRow.set(st.Update.Installable && !st.Update.Installed, u)
@@ -605,6 +625,7 @@ func (p *settingsPane) show(st app.State, u *gunim.UI) {
 	}
 	p.shell.SetSelected(max(slices.Index(p.shellIDs, st.ChosenShell), 0), nil)
 	p.termProgram.show(st.TermProgram, u)
+	p.proxy.show(st.Serving.Proxy, u)
 	setOn(p.pasteCheck, st.PasteCheck)
 	p.known.SetSelected(0, nil)
 	if i := slices.Index(app.KnownTerminals, st.TermProgram); i >= 0 {

@@ -63,6 +63,23 @@ type stored struct {
 	// wording, so the dialog can be reworded without orphaning it.
 	ServeReach *string `json:"serveReach,omitempty"`
 
+	// Relay is how the window is served through a relay.
+	Relay *Relay `json:"relay,omitempty"`
+
+	// RelayLast is the relay last connected to a window through, with
+	// its secret, to offer again.
+	RelayLast string `json:"relayLast,omitempty"`
+
+	// TunnelsConnect lets plain ssh's tunnels through a served window
+	// connect it to saved servers not connected yet, and go on through
+	// kakel windows it is connected to. Off, they reach what a kakel
+	// window connecting reaches: what is connected already.
+	TunnelsConnect bool `json:"tunnelsConnect,omitempty"`
+
+	// Proxy is the HTTP proxy a relay is reached through: a URL, "none"
+	// to go straight there, or empty for the one the system names.
+	Proxy string `json:"proxy,omitempty"`
+
 	// AgentHost is the agent program the hand-over dialog last wrote a
 	// prompt for, by the name that dialog offers.
 	AgentHost *string `json:"agentHost,omitempty"`
@@ -174,6 +191,95 @@ type stored struct {
 	// FilesWindow is where a window of file manager panes alone was,
 	// and how big, as it last closed.
 	FilesWindow *WindowPlace `json:"filesWindow,omitempty"`
+}
+
+// Relay is how the window is served through a relay.
+type Relay struct {
+	// URL is the relay, with its secret. The code the window is
+	// served under there is kept by the machine, not here, as settings
+	// can roam between machines and the code is each one's own.
+	URL string `json:"url,omitempty"`
+	// On says serving goes through the relay, and NoPort that it
+	// listens on no port of its own, as the Serve dialog was last set.
+	On     bool `json:"on,omitempty"`
+	NoPort bool `json:"noPort,omitempty"`
+	// Via is the ID of the saved server the relay is reached through,
+	// empty for this machine.
+	Via string `json:"via,omitempty"`
+}
+
+// Relay is how the window is served through a relay, as last set.
+func (s *Settings) Relay() Relay {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.have.Relay == nil {
+		return Relay{}
+	}
+	return *s.have.Relay
+}
+
+// PutRelay keeps how the window is served through a relay, and saves.
+func (s *Settings) PutRelay(r Relay) error {
+	return s.put(func(f *stored) { f.Relay = &r })
+}
+
+// RelayLast is the relay last connected to a window through.
+func (s *Settings) RelayLast() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.have.RelayLast
+}
+
+// PutRelayLast keeps the relay last connected to a window through.
+func (s *Settings) PutRelayLast(url string) error {
+	return s.put(func(f *stored) { f.RelayLast = url })
+}
+
+// Proxy is the HTTP proxy a relay is reached through, as set: empty
+// for the system's.
+func (s *Settings) Proxy() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.have.Proxy
+}
+
+// PutProxy keeps the HTTP proxy a relay is reached through.
+func (s *Settings) PutProxy(proxy string) error {
+	return s.put(func(f *stored) { f.Proxy = proxy })
+}
+
+// TunnelsConnect reports whether plain ssh's tunnels may connect the
+// served window to saved servers, and go through kakel windows.
+func (s *Settings) TunnelsConnect() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.have.TunnelsConnect
+}
+
+// PutTunnelsConnect keeps whether plain ssh's tunnels may connect the
+// served window to saved servers.
+func (s *Settings) PutTunnelsConnect(on bool) error {
+	return s.put(func(f *stored) { f.TunnelsConnect = on })
+}
+
+// put changes the settings as edit says, on the file as it is now,
+// and saves.
+func (s *Settings) put(edit func(f *stored)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// The file first: another window may have changed it since this one
+	// read it, and writing a copy built from a stale read would throw
+	// that work away.
+	if err := s.rereadLocked(); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnsaveable, err)
+	}
+	before := s.have
+	edit(&s.have)
+	if err := s.saveLocked(); err != nil {
+		s.have = before
+		return err
+	}
+	return nil
 }
 
 // SavedCommand is a command line the user asked to keep, the directory

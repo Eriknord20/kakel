@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/marrasen/kakel/relay"
 	"io"
 	"io/fs"
 	"os"
@@ -338,8 +339,8 @@ func (b *Book) routeLocked(h Host) ([]Host, error) {
 		if !ok {
 			return nil, fmt.Errorf("the server %q is reached through is not saved", route[len(route)-1].Name)
 		}
-		if next.Window {
-			return nil, fmt.Errorf("%q is reached through %q, a kakel window, and a window is no jump host", route[len(route)-1].Name, next.Name)
+		if next.Window && h.Window {
+			return nil, fmt.Errorf("%q is reached through %q, and one kakel window is not reached through another", route[len(route)-1].Name, next.Name)
 		}
 		h = next
 	}
@@ -469,7 +470,7 @@ func readBook(path string) ([]Host, error) {
 	if first, second, addr, dup := firstSharedServeAddr(file.Servers); dup {
 		return nil, fmt.Errorf(
 			"remote: the server list %s saves %q and %q as the window at %s",
-			path, first, second, addr)
+			path, first, second, relay.Shown(addr))
 	}
 	sortHosts(file.Servers)
 	giveIDs(file.Servers)
@@ -573,6 +574,10 @@ func checkRoutes(hosts []Host) error {
 				return fmt.Errorf("there is no saved server called %q to reach %q through",
 					h.Via, start.Name)
 			}
+			if next.Window && h.Window {
+				return fmt.Errorf("%q is reached through %q, and one kakel window is not reached through another",
+					h.Name, next.Name)
+			}
 			h = next
 		}
 	}
@@ -671,7 +676,7 @@ func readableBack(hosts []Host) error {
 	if first, second, addr, dup := firstSharedServeAddr(hosts); dup {
 		return fmt.Errorf(
 			"remote: will not write the server list: it saves %q and %q as the window at %s",
-			first, second, addr)
+			first, second, relay.Shown(addr))
 	}
 	if err := checkRoutes(hosts); err != nil {
 		return fmt.Errorf("remote: will not write the server list: %w", err)

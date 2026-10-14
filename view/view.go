@@ -34,6 +34,7 @@ import (
 	"github.com/marrasen/gunim/widget"
 
 	"github.com/marrasen/kakel/meter"
+	"github.com/marrasen/kakel/relay"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/secrets"
 	"github.com/marrasen/kakel/settings"
@@ -633,6 +634,9 @@ func (w *Window) run(id string, u *gunim.UI) bool {
 		return true
 	case "serve.window":
 		w.servingDialog(w.serving, u)
+		return true
+	case "serve.ssh":
+		w.sshDialog(w.serving, u)
 		return true
 	case "agent.share":
 		w.shareDialog(w.share, u)
@@ -1455,13 +1459,13 @@ func (w *Window) savingClashes(h remote.Host, old *remote.Host) string {
 	if h.Window {
 		for _, s := range w.saved {
 			if s.Window && (was == "" || s.ID != was) && s.ServeAddr() == h.ServeAddr() {
-				return fmt.Sprintf("%s is already saved as the window at %s; a window has one entry in the list.", s.Name, h.ServeAddr())
+				return fmt.Sprintf("%s is already saved as the window at %s; a window has one entry in the list.", s.Name, relay.Shown(h.ServeAddr()))
 			}
 		}
 	}
 	for _, rw := range w.remoteWindows {
 		if was != "" && rw.Name == machines.ID(was) && (!h.Window || rw.Addr != h.ServeAddr()) {
-			return fmt.Sprintf("%s is connected at %s; let go of it before changing where it is.", old.Name, rw.Addr)
+			return fmt.Sprintf("%s is connected at %s; let go of it before changing where it is.", old.Name, relay.Shown(rw.Addr))
 		}
 	}
 	return ""
@@ -1471,14 +1475,26 @@ func (w *Window) savingClashes(h remote.Host, old *remote.Host) string {
 func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 	name, addr, port, user, key := widget.NewTextField(), widget.NewTextField(), widget.NewTextField(), widget.NewTextField(), widget.NewTextField()
 	addr.Placeholder, port.Placeholder = "host name or address", "22"
+	// The code of a window served through a relay, whose address is
+	// then the relay's URL.
+	code := widget.NewTextField()
+	code.Placeholder = "XXXX-XXXX, for a window through a relay"
 	user.Placeholder, key.Placeholder = "your name here", "the usual keys in ~/.ssh"
-	// Through lists the other saved servers, to reach this one through.
-	// A kakel window is no jump host: it opens no SSH way on.
+	// Through lists the other saved servers, to reach this one through:
+	// a server, or a kakel window or its relay. A server can go through
+	// a kakel window too, which dials it from its machine; a window
+	// cannot, as it is reached over a stream of an SSH connection.
 	through := []string{"Directly"}
 	ids := []string{""}
+	windows := map[string]bool{}
 	for _, h := range w.saved {
-		if (old == nil || h.ID != old.ID) && !h.Window {
-			through = append(through, h.Name)
+		if old == nil || h.ID != old.ID {
+			label := h.Name
+			if h.Window {
+				label += " (kakel window)"
+				windows[h.ID] = true
+			}
+			through = append(through, label)
 			ids = append(ids, h.ID)
 		}
 	}
@@ -1518,6 +1534,7 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 		if old.Window {
 			kind.SetSelected(1, nil)
 		}
+		code.SetText(old.Code, nil)
 		setup.SetChecked(old.Setup, nil)
 		forward.SetChecked(old.ForwardAgent, nil)
 		for i, id := range ids {
@@ -1556,17 +1573,27 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 		}
 		h.Via = ids[max(0, min(via.Selected(), len(ids)-1))]
 		h.Window = kind.Selected() == 1
+		h.Code = ""
+		if c := strings.TrimSpace(code.Text()); h.Window && c != "" {
+			parsed, err := relay.ParseCode(c)
+			if err != nil {
+				return h, words.UpperFirst(err.Error()) + "."
+			}
+			h.Code, h.Port = parsed, 0
+			if u, err := relay.ParseURL(h.Address); err == nil {
+				h.Address = u.String()
+			}
+		}
 		if old != nil {
 			// Folders saved before favourites stay until they are moved.
 			h.Folders = old.Folders
 		}
 		// A window keeps the agent tick it had, unused, so switching it
-		// back to a server brings it back. Not its route: a window
-		// naming a jump host would keep that host from being removed,
-		// for a route it never takes.
+		// back to a server brings it back. Its route it takes: a window,
+		// or its relay, can be reached through a saved server.
 		h.Setup, h.ForwardAgent = setup.Checked(), forward.Checked()
-		if h.Window {
-			h.Via = ""
+		if h.Window && windows[h.Via] {
+			return h, "A kakel window is reached through a server, not through another window."
 		}
 		if err := h.Validate(); err != nil {
 			return h, words.UpperFirst(err.Error()) + "."
@@ -1576,17 +1603,33 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 		}
 		return h, ""
 	}
-	// A window has no account, nothing to go through and no session to
-	// carry an agent over: those are greyed out while the type says
-	// window, rather than taken and dropped.
+	// A window has no account and no session to carry an agent over:
+	// those are greyed out while the type says window, rather than
+	// taken and dropped.
 	applies := func() {
 		window := kind.Selected() == 1
-		via.Disabled = window || len(ids) <= 1
+		via.Disabled = len(ids) <= 1
 		forward.Disabled = window
+		code.Disabled = !window
+		addr.Placeholder = "host name or address"
+		if window {
+			addr.Placeholder = "host name or address, or a relay's URL"
+		}
 	}
 	applies()
 	kind.OnChange = func(int, *gunim.UI) gunim.Intent { applies(); return nil }
-	form := widget.NewForm().Add("Name", name).Add("Type", kind).Add("Address", addr).Add("Port", port).Add("User", user).
+	// A link pasted whole, the relay and the code, is split into the two.
+	addr.OnChange = func(text string, u *gunim.UI) gunim.Intent {
+		if l, err := relay.ParseLink(text); err == nil {
+			addr.SetText(l.Relay.String(), u)
+			code.SetText(l.Code, u)
+			kind.SetSelected(1, u)
+			applies()
+			u.Invalidate()
+		}
+		return nil
+	}
+	form := widget.NewForm().Add("Name", name).Add("Type", kind).Add("Address", addr).Add("Code", code).Add("Port", port).Add("User", user).
 		Add("Through", via).Add("Key file", key)
 	if kept != nil {
 		form.Add("Saved keys", kept)
@@ -2029,7 +2072,7 @@ func (w *Window) Update(st app.State, u *gunim.UI) {
 		}
 		key := "client:" + c.Name + ":" + strconv.Itoa(i)
 		item := sideItem{key: key, text: "serving " + c.Name, note: "from " + c.From, local: func(u *gunim.UI) { w.servingDialog(w.serving, u) },
-			closes: app.DisconnectClient(c)}
+			closes: app.DisconnectClient{Name: c.Name, From: c.From}}
 		rows = slices.Insert(rows, at, item)
 		// Under it, a row for each tunnel it holds through this window.
 		for j, t := range st.Serving.Tunnels {

@@ -1,17 +1,20 @@
 package view
 
 import (
+	"net"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/marrasen/kakel/app"
+	"github.com/marrasen/kakel/machines"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/widget"
 
+	"github.com/marrasen/kakel/relay"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/words"
 )
@@ -25,6 +28,8 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	}
 	form := widget.NewForm().Add("", widget.NewLabel("A connected window can open shells here, use the ones running, and read and write files as you."))
 	addAllowed(form, s)
+	onPort := widget.NewCheckbox("On a port of this machine")
+	onPort.SetChecked(!s.NoPort, nil)
 	port := widget.NewTextField()
 	port.SetText(strconv.Itoa(s.Port), nil)
 	port.Placeholder = "0 picks a free port"
@@ -33,9 +38,28 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	if s.Anywhere {
 		where.SetSelected(1, nil)
 	}
+	onRelay := widget.NewCheckbox("Through a relay")
+	onRelay.SetChecked(s.RelayOn, nil)
+	relayURL := widget.NewTextField()
+	relayURL.SetText(s.RelayURL, nil)
+	relayURL.Placeholder = "https://relay.example.com/k/…"
+	relayVia, viaIDs := w.throughPicker(s.RelayVia)
+	enable := func() {
+		port.Disabled, where.Disabled = !onPort.Checked(), !onPort.Checked()
+		relayURL.Disabled = !onRelay.Checked()
+		relayVia.Disabled = !onRelay.Checked() || len(viaIDs) <= 1
+	}
+	enable()
+	onPort.OnChange = func(bool, *gunim.UI) gunim.Intent { enable(); return nil }
+	onRelay.OnChange = func(bool, *gunim.UI) gunim.Intent { enable(); return nil }
 	// Said beside the field, as the field opens with a port in it and
 	// a placeholder would never show.
-	form.Add("Port", port).Add("", widget.NewLabel("0 picks a free port.")).Add("Listen on", where)
+	form.Add("", onPort).Add("Port", port).Add("", widget.NewLabel("0 picks a free port.")).Add("Listen on", where)
+	form.Add("", onRelay).Add("Relay", relayURL).Add("Through", relayVia)
+	if s.RelayVia != "" && !slices.Contains(viaIDs, s.RelayVia) {
+		form.Add("", widget.NewLabel("The server the relay was reached through is no longer saved, so this machine reaches it now."))
+	}
+	form.Add("", widget.NewLabel(relayCodeSays(s)))
 	d := widget.NewDialog("Serve This Window")
 	d.Body = form
 	d.SetButtons("Serve", "Cancel")
@@ -43,10 +67,19 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 	d.Check = func() string {
 		n, err := strconv.Atoi(strings.TrimSpace(port.Text()))
 		switch {
-		case err != nil || n < 0 || n > 65535:
+		case !onPort.Checked() && !onRelay.Checked():
+			return "Serve on a port, through a relay, or both."
+		case onPort.Checked() && (err != nil || n < 0 || n > 65535):
 			return "The port is a number from 0 to 65535."
+		case onRelay.Checked() && strings.TrimSpace(relayURL.Text()) == "":
+			return "Paste the relay's URL, as kakel -relay printed it."
 		case len(s.Allowed) == 0:
 			return "Add a key that may connect first."
+		}
+		if onRelay.Checked() {
+			if _, err := relay.ParseURL(relayURL.Text()); err != nil {
+				return words.UpperFirst(err.Error()) + "."
+			}
 		}
 		return ""
 	}
@@ -54,17 +87,46 @@ func (w *Window) servingDialog(s app.Serving, u *gunim.UI) {
 		// Shown once it is served: the host key, to check from the
 		// other end. Nothing, if serving did not start.
 		w.servingAsked, w.servingTries = true, s.Tries
-		return app.StartServing{Port: port.Text(), Anywhere: where.Selected() == 1}
+		return app.StartServing{Port: port.Text(), Anywhere: where.Selected() == 1,
+			NoPort: !onPort.Checked(), Relay: onRelay.Checked(), RelayURL: relayURL.Text(),
+			RelayVia: viaIDs[max(0, min(relayVia.Selected(), len(viaIDs)-1))]}
 	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
 }
 
+// relayCodeSays is what the Serve dialog says of the code the window
+// is served under on a relay.
+func relayCodeSays(s app.Serving) string {
+	if s.Code == "" {
+		return "Kakel makes a code for the other end to type, and keeps it."
+	}
+	return "The other end types the code " + s.Code + ". It stays the same each time."
+}
+
+// relaySays is how serving through the relay is going.
+func relaySays(s app.Serving) string {
+	switch {
+	case s.Reached:
+		return "Reached. Windows connect with the code."
+	case s.RelayTrouble != "":
+		return "Not reached: " + s.RelayTrouble + ". Trying again."
+	}
+	return "Reaching the relay…"
+}
+
 // servedDialog says where the window is served and who is connected.
 func (w *Window) servedDialog(s app.Serving, u *gunim.UI) {
-	form := widget.NewForm().
-		Add("Address", widget.NewLabel(s.Addr)).
-		Add("Host key", widget.NewLabel(s.Fingerprint))
+	form := widget.NewForm()
+	if s.Addr != "" {
+		form.Add("Address", widget.NewLabel(s.Addr))
+	}
+	var code, state *widget.Label
+	if s.Relayed {
+		code, state = widget.NewLabel(s.Code), widget.NewLabel(relaySays(s))
+		form.Add("Relay", widget.NewLabel(s.RelayHost)).Add("Code", code).Add("", state)
+	}
+	form.Add("Host key", widget.NewLabel(s.Fingerprint))
 	who := widget.NewLabel(connectedSays(s))
 	form.Add("Connected", who)
 	addAllowed(form, s)
@@ -72,10 +134,19 @@ func (w *Window) servedDialog(s app.Serving, u *gunim.UI) {
 	d.Body = form
 	d.SetButtons("Done", "")
 	w.keyActions(d, s)
+	d.AddAction("Use with ssh…", func(u *gunim.UI) gunim.Intent {
+		d.Close(u)
+		w.sshDialog(w.serving, u)
+		return nil
+	})
+	if s.Relayed {
+		d.AddAction("Copy Link", func(u *gunim.UI) gunim.Intent { return app.CopyRelayLink{} })
+		d.AddAction("New Code", func(u *gunim.UI) gunim.Intent { return app.NewRelayCode{} })
+	}
 	d.AddButton("Disconnect All", func(u *gunim.UI) gunim.Intent { return app.DisconnectClients{} })
 	d.AddButton("Stop Serving", func(u *gunim.UI) gunim.Intent { return app.StopServing{} })
 	d.OnAccept, d.OnDismiss = widget.Sends(app.DialogClosed{}), widget.Sends(app.DialogClosed{})
-	w.served = &servedShown{d: d, who: who}
+	w.served = &servedShown{d: d, who: who, code: code, state: state}
 	w.openDialog(d, u)
 }
 
@@ -190,7 +261,11 @@ func connectedSays(s app.Serving) string {
 	}
 	var lines []string
 	for _, c := range s.Clients {
-		lines = append(lines, c.Name+", from "+c.From)
+		line := c.Name + ", from " + c.From
+		if c.As != "" {
+			line += ", with ssh, through " + c.As
+		}
+		lines = append(lines, line)
 		for _, t := range s.Tunnels {
 			if t.Client == c.Name && t.From == c.From {
 				lines = append(lines, "    a tunnel, "+t.Label+", on "+t.On)
@@ -205,6 +280,9 @@ func connectedSays(s app.Serving) string {
 type servedShown struct {
 	d   *widget.Dialog
 	who *widget.Label
+	// code and state are the code on the relay and how reaching it is
+	// going, nil when the window is not served through one.
+	code, state *widget.Label
 }
 
 // showServed keeps the dialog saying the window is served up to date
@@ -220,6 +298,9 @@ func (w *Window) showServed(s app.Serving, u *gunim.UI) {
 			sh.d.Close(u)
 		default:
 			sh.who.Text = connectedSays(s)
+			if sh.code != nil {
+				sh.code.Text, sh.state.Text = s.Code, relaySays(s)
+			}
 			u.Invalidate()
 		}
 	}
@@ -241,23 +322,191 @@ func (w *Window) showServed(s app.Serving, u *gunim.UI) {
 	}
 }
 
-// connectWindowDialog asks for a served window to connect to.
+// connectWindowDialog asks for a served window to connect to: at an
+// address, or through a relay by its code.
 func (w *Window) connectWindowDialog(u *gunim.UI) {
+	how := widget.NewDropdown(widget.Labels("Directly", "Through a relay"))
+	how.Label = "Connect"
 	addr, key := widget.NewTextField(), widget.NewTextField()
 	addr.Placeholder = "host, or host:" + strconv.Itoa(remote.ServePort)
 	key.Placeholder = "the usual keys in ~/.ssh"
+	relayURL, code := widget.NewTextField(), widget.NewTextField()
+	relayURL.Placeholder = "https://relay.example.com/k/…"
+	code.Placeholder = "XXXX-XXXX"
+	if last := w.serving.RelayLast; last != "" {
+		relayURL.SetText(last, nil)
+		how.SetSelected(1, nil)
+	}
+	// A link pasted whole, the relay and the code, is split into the two.
+	relayURL.OnChange = func(text string, u *gunim.UI) gunim.Intent {
+		if l, err := relay.ParseLink(text); err == nil {
+			relayURL.SetText(l.Relay.String(), u)
+			code.SetText(l.Code, u)
+		}
+		return nil
+	}
+	via, viaIDs := w.throughPicker("")
+	via.Disabled = len(viaIDs) <= 1
+	applies := func() {
+		viaRelay := how.Selected() == 1
+		addr.Disabled = viaRelay
+		relayURL.Disabled, code.Disabled = !viaRelay, !viaRelay
+	}
+	applies()
+	addr.OnChange = func(text string, u *gunim.UI) gunim.Intent {
+		if l, err := relay.ParseLink(text); err == nil {
+			addr.SetText("", u)
+			relayURL.SetText(l.Relay.String(), u)
+			code.SetText(l.Code, u)
+			how.SetSelected(1, u)
+			applies()
+			u.Invalidate()
+		}
+		return nil
+	}
+	how.OnChange = func(int, *gunim.UI) gunim.Intent { applies(); return nil }
 	d := widget.NewDialog("Connect to Window")
 	d.Body = widget.NewForm().
 		Add("", widget.NewLabel("The other window must be served, with this machine's public key in its authorized keys.")).
-		Add("Address", addr).Add("Key file", key)
+		Add("Connect", how).Add("Address", addr).Add("Relay", relayURL).Add("Code", code).Add("Through", via).Add("Key file", key)
 	d.SetButtons("Connect", "Cancel")
+	link := func() (string, string) {
+		u, err := relay.ParseURL(relayURL.Text())
+		if err != nil {
+			return "", words.UpperFirst(err.Error()) + "."
+		}
+		c, err := relay.ParseCode(code.Text())
+		if err != nil {
+			return "", words.UpperFirst(err.Error()) + "."
+		}
+		return relay.Link{Relay: u, Code: c}.String(), ""
+	}
 	d.Check = func() string {
+		if how.Selected() == 1 {
+			_, why := link()
+			return why
+		}
 		if strings.TrimSpace(addr.Text()) == "" {
 			return "Type the other window's address."
 		}
 		return ""
 	}
-	d.OnAccept = func(u *gunim.UI) gunim.Intent { return app.ConnectWindow{Addr: addr.Text(), KeyFile: key.Text()} }
+	d.OnAccept = func(u *gunim.UI) gunim.Intent {
+		to := addr.Text()
+		if how.Selected() == 1 {
+			to, _ = link()
+		}
+		return app.ConnectWindow{Addr: to, KeyFile: key.Text(), Via: viaIDs[max(0, min(via.Selected(), len(viaIDs)-1))], ViaSet: true}
+	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
+	w.openDialog(d, u)
+}
+
+// throughPicker offers the saved servers to reach something through,
+// after "This machine", with picked chosen, and their IDs in the same
+// order, "" for this machine. A kakel window is not offered.
+func (w *Window) throughPicker(picked machines.ID) (*widget.Dropdown, []machines.ID) {
+	labels := []string{"This machine"}
+	ids := []machines.ID{""}
+	for _, h := range w.saved {
+		if !h.Window {
+			labels = append(labels, h.Name)
+			ids = append(ids, machines.ID(h.ID))
+		}
+	}
+	d := widget.NewDropdown(widget.Labels(labels...))
+	d.Label = "Through"
+	for i, id := range ids {
+		if id != "" && id == picked {
+			d.SetSelected(i, nil)
+		}
+	}
+	return d, ids
+}
+
+// sshDialog explains plain ssh's tunnels through this window, with the
+// commands as they would be typed on another machine: this one's port,
+// name, relay and saved machines, each with a Copy beside it.
+func (w *Window) sshDialog(s app.Serving, u *gunim.UI) {
+	host := s.Host
+	if host == "" {
+		host = "this-machine"
+	}
+	port := strconv.Itoa(s.Port)
+	if s.On && s.Addr != "" {
+		if _, p, err := net.SplitHostPort(s.Addr); err == nil {
+			port = p
+		}
+	}
+	direct := s.On && s.Addr != "" || !s.On && !s.NoPort
+	relayed := s.Relayed || !s.On && s.RelayOn
+	// A column rather than a form: the text has the width, and a form's
+	// column of names would stand empty beside all of it.
+	var parts []gunim.Node
+	say := func(text string) { parts = append(parts, widget.NewLabel(text)) }
+	say("Plain ssh, on any machine, can make tunnels through this window, with the same keys a kakel window connects with. There is no shell, so -N is always given.")
+	example := func(title, cmd string) {
+		line := selectable(cmd)
+		line.Face = widget.MonoFont
+		copyIt := widget.NewButton("Copy")
+		copyIt.OnClick = func(u *gunim.UI) gunim.Intent {
+			u.SetClipboard(cmd)
+			w.toast(widget.Toast{Title: "Command copied", Kind: widget.ToastSuccess}, u)
+			return nil
+		}
+		row := widget.Row(line, copyIt).Grow(line, 1)
+		row.Cross, row.Gap = widget.CrossCenter, settingsButtons
+		parts = append(parts, faintLabel(title), row)
+	}
+	if direct {
+		example("Port 8080 on the other machine reaches intranet port 80, as this machine finds it:",
+			"ssh -p "+port+" -N -L 8080:intranet:80 kakel@"+host)
+		if !s.Anywhere {
+			say("The port listens on this machine only. For another machine, serve on all networks, or through a relay.")
+		}
+	}
+	if relayed {
+		link := s.Link
+		if link == "" {
+			link = "<the relay's URL>#<code>"
+		}
+		example("Through the relay, with kakel on the other machine to reach it:",
+			`ssh -o ProxyCommand="kakel -relay-pipe `+link+`" -N -L 8080:intranet:80 kakel@`+host)
+	}
+	if !direct && !relayed {
+		say("Serve this window on a port or through a relay first.")
+	}
+	say("The user name says where the tunnel goes out from: kakel for this machine, or a machine saved here, by its name in lower case with dashes for spaces.")
+	var names []string
+	for _, h := range w.saved {
+		names = append(names, remote.CommandName(h.Name))
+	}
+	if len(names) > 0 {
+		at := "-p " + port + " "
+		if !direct {
+			at = ""
+		}
+		example("For instance, out from "+w.saved[0].Name+":", "ssh "+at+"-N -L 8080:intranet:80 "+names[0]+"@"+host)
+		parts = append(parts, selectable("Saved here: "+strings.Join(names, ", ")))
+	}
+	if s.TunnelsConnect {
+		say("A saved server that is not connected is connected to on the way, when that needs nothing asked here: a key, or a password in the secrets while they are open. Otherwise the tunnel is refused, saying to connect it here first. A kakel window connected here can be gone through too.")
+	} else {
+		say("A saved server has to be connected here already. Settings › Sharing › Tunnels may connect lets a tunnel connect it on the way, when that needs nothing asked here, and go through kakel windows connected here.")
+	}
+	if direct {
+		example("-J and -W work the same way. To reach intranet's own ssh through this window:",
+			"ssh -J kakel@"+host+":"+port+" user@intranet")
+	}
+	if s.Fingerprint != "" {
+		say("ssh asks to trust this window's host key the first time; it should be this one:")
+		parts = append(parts, selectable(s.Fingerprint))
+	}
+	d := widget.NewDialog("Tunnels with ssh")
+	col := widget.Column(parts...)
+	col.Gap = settingsButtons
+	d.Body = widget.NewSized(col, 560, 0)
+	d.SetButtons("Done", "")
+	d.OnAccept, d.OnDismiss = widget.Sends(app.DialogClosed{}), widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
 }

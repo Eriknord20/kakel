@@ -351,7 +351,9 @@ func (a *app) noteSecretHints(items []secrets.Item) {
 // they are opened for, which the question names. Declined, or nothing held, it reports false and
 // the question for the key or the password goes on as before.
 func (q asker) unlockFor(ctx context.Context, hint string, saved AskFact) bool {
-	if q.kept == nil {
+	// Opening the secrets asks, on a context of its own: a connection
+	// that may ask nothing does without them.
+	if q.kept == nil || ctx.Value(noAsking{}) != nil {
 		return false
 	}
 	got := make(chan *secrets.Vault, 1)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"maps"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"github.com/marrasen/kakel/internal/winattrs"
 	"github.com/marrasen/kakel/machines"
 	"github.com/marrasen/kakel/meter"
+	"github.com/marrasen/kakel/relay"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/screen"
 	"github.com/marrasen/kakel/serve"
@@ -53,6 +55,37 @@ type Serving struct {
 	Port     int
 	Anywhere bool
 	AtStart  string
+	// Relay is how serving goes through a relay: RelayOn says it does,
+	// NoPort that it listens on no port of its own, RelayURL is the
+	// relay with its secret, RelayHost the relay without it, and Code
+	// what a window connecting gives there. Link is the URL and the
+	// code together, for a window connecting to paste.
+	RelayOn  bool
+	NoPort   bool
+	RelayURL string
+	// RelayVia is the saved server the relay is reached through, empty
+	// for this machine.
+	RelayVia  machines.ID
+	RelayHost string
+	Code      string
+	Link      string
+	// Relayed says the window is served through the relay now; Reached
+	// that the relay has it, and RelayTrouble why not when it has not.
+	Relayed      bool
+	Reached      bool
+	RelayTrouble string
+	// RelayLast is the relay last connected to a window through, to
+	// offer again.
+	RelayLast string
+	// Host is this machine's name, for the ssh commands the window
+	// explains.
+	Host string
+	// TunnelsConnect lets plain ssh's tunnels connect this window to
+	// saved servers on the way, and go through kakel windows.
+	TunnelsConnect bool
+	// Proxy is the HTTP proxy relays are reached through, as set: empty
+	// for the system's, relay.NoProxy for none.
+	Proxy string
 	// Allowed are the keys that may connect, by name, from the file at
 	// AllowedAt, Keys the same keys with their fingerprints, and
 	// Problem what stops that file being read.
@@ -77,7 +110,10 @@ type Serving struct {
 type LocalKey struct{ Name, Path string }
 
 // ServedClient is a window connected to this one.
-type ServedClient struct{ Name, From string }
+//
+// As is the machine a plain ssh client's tunnels go out from, by the
+// user name it logged in as; empty for a kakel window.
+type ServedClient struct{ Name, From, As string }
 
 // ServedTunnel is a tunnel a window connected to this one holds through
 // it: whose, Client from From, what it forwards, and the machine here
@@ -95,7 +131,26 @@ type (
 	StartServing struct {
 		Port     string
 		Anywhere bool
+		// NoPort listens on no port, and Relay serves through the relay
+		// at RelayURL as well, or instead, reached through the saved
+		// server RelayVia, or from this machine when that is empty.
+		NoPort   bool
+		Relay    bool
+		RelayURL string
+		RelayVia machines.ID
 	}
+	// NewRelayCode gives the window a new code on the relay; the old one
+	// lets nobody else in.
+	NewRelayCode struct{}
+	// CopyRelayLink copies the relay's URL and the code, for a window
+	// connecting to paste.
+	CopyRelayLink struct{}
+	// SetTunnelsConnect sets whether plain ssh's tunnels may connect
+	// this window to saved servers, and go through kakel windows.
+	SetTunnelsConnect struct{ On bool }
+	// SetRelayProxy sets the HTTP proxy relays are reached through: a
+	// URL, relay.NoProxy, or empty for the system's.
+	SetRelayProxy struct{ Proxy string }
 	// StopServing stops, hanging up on every window connected.
 	StopServing struct{}
 	// DisconnectClients hangs up on the windows connected.
@@ -120,7 +175,20 @@ type (
 
 // serving is the program's side.
 type serving struct {
-	server  *serve.Server
+	server *serve.Server
+	// relay is the window's place on the relay, while it is served
+	// through one, and reached and trouble how that is going.
+	relay   *relay.Listener
+	reached bool
+	trouble string
+	// troubled says a failure to reach the relay has been shown since
+	// it was last reached, so the next is logged and not shown again.
+	troubled bool
+	// code and token are the ones kept in RelayCodeFile, once read.
+	code, token string
+	// unasked are the saved machines a plain ssh tunnel could not
+	// connect to without asking, and when.
+	unasked map[machines.ID]time.Time
 	clients []*serve.Client
 	// carried are the tunnels each client holds through this window, as
 	// it last said.
@@ -287,11 +355,26 @@ func (a *app) applyAllowed() int {
 // startServing serves the window.
 func (a *app) startServing(in StartServing) error {
 	if a.serving.server != nil {
-		return fmt.Errorf("this window is already served on %s", a.serving.server.Addr())
+		return fmt.Errorf("this window is already served on %s", a.servedWhere())
 	}
-	port, err := strconv.Atoi(strings.TrimSpace(in.Port))
-	if err != nil || port < 0 || port > 65535 {
-		return fmt.Errorf("%q is not a port number", strings.TrimSpace(in.Port))
+	if in.NoPort && !in.Relay {
+		return errors.New("serve on a port, through a relay, or both")
+	}
+	port := 0
+	if !in.NoPort {
+		n, err := strconv.Atoi(strings.TrimSpace(in.Port))
+		if err != nil || n < 0 || n > 65535 {
+			return fmt.Errorf("%q is not a port number", strings.TrimSpace(in.Port))
+		}
+		port = n
+	}
+	var relayURL relay.URL
+	if in.Relay {
+		u, err := relay.ParseURL(in.RelayURL)
+		if err != nil {
+			return err
+		}
+		relayURL = u
 	}
 	keyAt, allowedAt, err := a.servePaths()
 	if err != nil {
@@ -312,9 +395,28 @@ func (a *app) startServing(in StartServing) error {
 	if in.Anywhere {
 		host = ""
 	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	if in.NoPort {
+		addr = ""
+	}
 	post := func(f func()) { a.events <- f }
+	var lns []net.Listener
+	var rl *relay.Listener
+	if in.Relay {
+		code, token, err := a.keptRelay()
+		if err != nil {
+			return err
+		}
+		rl, err = relay.Listen(relay.HostConfig{Relay: relayURL, Code: code, Token: token, Dialer: a.relayDialer(in.RelayVia, &throughRefused{}),
+			OnState: func(code string, err error) { post(func() { a.relayState(rl, code, err) }) }})
+		if err != nil {
+			return err
+		}
+		lns = append(lns, rl)
+	}
 	srv, err := serve.Listen(serve.Config{
-		Addr:       net.JoinHostPort(host, strconv.Itoa(port)),
+		Addr:       addr,
+		Listeners:  lns,
 		HostKey:    hostKey,
 		Allowed:    allowed,
 		Opens:      a.opens,
@@ -322,6 +424,7 @@ func (a *app) startServing(in StartServing) error {
 		Open:       a.openFor,
 		OpenOn:     a.openOnFor,
 		Dial:       a.dialFor,
+		DialAs:     a.dialAs,
 		Log:        a.logFor,
 		Disconnect: a.disconnectFor,
 		StartAgain: a.startAgainFor,
@@ -337,6 +440,7 @@ func (a *app) startServing(in StartServing) error {
 		OnStopped: func(err error) {
 			post(func() {
 				a.serving.server, a.serving.clients, a.serving.carried = nil, nil, nil
+				a.serving.relay = nil
 				a.failed("This window is no longer served", err.Error())
 				a.problem()
 				a.showServing()
@@ -347,16 +451,28 @@ func (a *app) startServing(in StartServing) error {
 		OnError: func(err error) { log.Printf("serving: %v", err) },
 	})
 	if err != nil {
+		if rl != nil {
+			_ = rl.Close()
+		}
 		return err
 	}
-	a.serving.server = srv
-	log.Printf("serving this window on %s", srv.Addr())
+	a.serving.server, a.serving.relay = srv, rl
+	a.serving.reached, a.serving.trouble, a.serving.troubled = false, "", false
+	log.Printf("serving this window on %s", a.servedWhere())
 	if a.settings != nil {
 		reach := settings.ReachHere
 		if in.Anywhere {
 			reach = settings.ReachAnywhere
 		}
-		a.keep("what is served", a.settings.PutServe(port, reach))
+		if !in.NoPort {
+			a.keep("what is served", a.settings.PutServe(port, reach))
+		}
+		r := a.settings.Relay()
+		r.On, r.NoPort = in.Relay, in.NoPort
+		if in.Relay {
+			r.URL, r.Via = relayURL.String(), string(in.RelayVia)
+		}
+		a.keep("how this window is served through a relay", a.settings.PutRelay(r))
 		a.keep("that this window is served", a.settings.PutServeOn(true))
 	}
 	a.tellServed()
@@ -371,6 +487,7 @@ func (a *app) stopServing() error {
 		return nil
 	}
 	a.serving.server, a.serving.clients, a.serving.carried = nil, nil, nil
+	a.serving.relay = nil
 	log.Print("stopped serving this window")
 	if a.settings != nil {
 		a.keep("that this window is not served", a.settings.PutServeOn(false))
@@ -499,10 +616,36 @@ func (a *app) showServing() {
 		s.Allowed, s.Keys = allowed.Names(), allowed.Keys()
 		s.Here = a.localKeys(allowed)
 	}
+	if a.settings != nil {
+		r := a.settings.Relay()
+		s.RelayOn, s.NoPort, s.RelayURL, s.RelayVia = r.On, r.NoPort, r.URL, machines.ID(r.Via)
+		s.RelayLast, s.Proxy = a.settings.RelayLast(), a.settings.Proxy()
+		s.TunnelsConnect = a.settings.TunnelsConnect()
+	}
+	if host, err := os.Hostname(); err == nil {
+		s.Host = host
+	}
+	if code, _, err := a.relayKept(); err == nil {
+		s.Code = code
+	}
+	if rl := a.serving.relay; rl != nil {
+		s.RelayURL, s.Code = rl.Relay().String(), rl.Code()
+		s.Relayed, s.Reached, s.RelayTrouble = true, a.serving.reached, a.serving.trouble
+	}
+	if u, err := relay.ParseURL(s.RelayURL); err == nil {
+		s.RelayHost = u.Host()
+		if s.Code != "" {
+			s.Link = relay.Link{Relay: u, Code: s.Code}.String()
+		}
+	}
 	if srv := a.serving.server; srv != nil {
 		s.On, s.Addr, s.Fingerprint = true, srv.Addr(), serve.Fingerprint(srv.HostKey())
 		for _, c := range a.serving.clients {
-			s.Clients = append(s.Clients, ServedClient{Name: c.Name, From: c.Addr})
+			sc := ServedClient{Name: c.Name, From: c.Addr}
+			if c.User != serve.WindowUser {
+				sc.As = c.User
+			}
+			s.Clients = append(s.Clients, sc)
 			for _, n := range a.serving.carried[c] {
 				on := "this machine"
 				if n.Host != "" {
@@ -982,7 +1125,14 @@ func (a *app) offerToServeAgain() {
 	if s.Port == 0 {
 		port = "on whichever port was free"
 	}
-	ans, err := a.ask(a.ctx, Ask{Title: "Serve this window again?", Text: "It was served when it last closed: " + port + ", listening on " + where + ".",
+	said := port + ", listening on " + where
+	switch {
+	case s.RelayOn && s.NoPort:
+		said = "through the relay " + s.RelayHost + ", as " + s.Code
+	case s.RelayOn:
+		said += ", and through the relay " + s.RelayHost + ", as " + s.Code
+	}
+	ans, err := a.ask(a.ctx, Ask{Title: "Serve this window again?", Text: "It was served when it last closed: " + said + ".",
 		Yes: "Serve", No: "Not Now", Also: "Don't ask again"})
 	if err != nil && !errors.Is(err, errDeclined) {
 		return
@@ -1004,10 +1154,196 @@ func (a *app) offerToServeAgain() {
 	if !ans.Yes {
 		return
 	}
-	in := StartServing{Port: strconv.Itoa(s.Port), Anywhere: s.Anywhere}
 	a.events <- func() {
-		if err := a.startServing(in); err != nil {
+		if err := a.startServing(a.servedLast()); err != nil {
 			a.failed("Couldn't serve the window", err.Error())
 		}
 	}
+}
+
+// servedWhere says where the window is served: its port, its relay, or
+// both.
+func (a *app) servedWhere() string {
+	var where []string
+	if srv := a.serving.server; srv != nil && srv.Addr() != "" {
+		where = append(where, srv.Addr())
+	}
+	if rl := a.serving.relay; rl != nil {
+		where = append(where, rl.Addr().String())
+	}
+	return strings.Join(where, " and ")
+}
+
+// RelayCodeFile is the file the code a window is served under on a
+// relay is kept in, with the token that keeps it: beside the host key,
+// so each machine has its own, even where the settings roam between
+// machines, and nobody else can read the token.
+const RelayCodeFile = "relay_code"
+
+// keptRelay is the code and token the window is served under on a
+// relay: the ones kept, made and kept the first time they are asked
+// for.
+func (a *app) keptRelay() (code, token string, err error) {
+	code, token, err = a.relayKept()
+	if err != nil || code != "" {
+		return code, token, err
+	}
+	return a.keepRelayCode(relay.NewCode(), relay.NewToken())
+}
+
+// relayKept is the code and token kept, empty when none is: nothing is
+// written to the disk until serving through a relay asks for one.
+func (a *app) relayKept() (code, token string, err error) {
+	if a.serving.code != "" {
+		return a.serving.code, a.serving.token, nil
+	}
+	path, err := a.relayCodePath()
+	if err != nil {
+		return "", "", err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", "", err
+	}
+	lines := strings.Fields(string(raw))
+	if len(lines) == 2 {
+		if c, err := relay.ParseCode(lines[0]); err == nil && len(lines[1]) >= 16 {
+			a.serving.code, a.serving.token = c, lines[1]
+			return c, lines[1], nil
+		}
+	}
+	return "", "", nil
+}
+
+// keepRelayCode keeps code and token as the ones the window is served
+// under on a relay.
+func (a *app) keepRelayCode(code, token string) (string, string, error) {
+	path, err := a.relayCodePath()
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(path, []byte(code+"\n"+token+"\n"), 0o600); err != nil {
+		return "", "", fmt.Errorf("keep the code on the relay: %w", err)
+	}
+	a.serving.code, a.serving.token = code, token
+	return code, token, nil
+}
+
+// relayCodePath is where the code on a relay is kept: beside the host
+// key.
+func (a *app) relayCodePath() (string, error) {
+	keyAt, _, err := a.servePaths()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(keyAt), RelayCodeFile), nil
+}
+
+// relayState hears how the window's place on the relay is going.
+func (a *app) relayState(rl *relay.Listener, code string, err error) {
+	// One from before a new code, which says nothing of the new one.
+	if a.serving.relay != rl || code != rl.Code() {
+		return
+	}
+	where := rl.Addr().String()
+	switch {
+	case err == nil:
+		if !a.serving.reached {
+			log.Printf("served through the relay, as %s", where)
+		}
+		a.serving.reached, a.serving.trouble, a.serving.troubled = true, "", false
+	default:
+		why := err.Error()
+		if why != a.serving.trouble {
+			log.Printf("couldn't reach the relay for %s: %s; trying again", where, why)
+		}
+		if !a.serving.troubled {
+			a.serving.troubled = true
+			a.failed("Couldn't reach the relay", why+"\n\nKakel goes on trying.")
+			a.problem()
+		}
+		a.serving.reached, a.serving.trouble = false, why
+	}
+	a.showServing()
+}
+
+// newRelayCode gives the window a new code on the relay, at once when
+// it is served through one, and for the next time otherwise.
+func (a *app) newRelayCode() error {
+	_, token, err := a.keptRelay()
+	if err != nil {
+		return err
+	}
+	code, _, err := a.keepRelayCode(relay.NewCode(), token)
+	if err != nil {
+		return err
+	}
+	if rl := a.serving.relay; rl != nil {
+		if err := rl.SetCode(code); err != nil {
+			return err
+		}
+		a.serving.reached = false
+		log.Printf("the window is served under a new code on the relay, %s", code)
+	}
+	a.showServing()
+	return nil
+}
+
+// copyRelayLink copies the relay and the code, for a window connecting.
+func (a *app) copyRelayLink() error {
+	link := a.st.Serving.Link
+	if link == "" {
+		return errors.New("this window has no code on a relay yet")
+	}
+	a.worked("Link copied", "Paste it into Connect to Window on the other machine. It holds the relay's secret.", link)
+	return nil
+}
+
+// servedLast is serving as it was last started.
+func (a *app) servedLast() StartServing {
+	s := a.st.Serving
+	return StartServing{Port: strconv.Itoa(s.Port), Anywhere: s.Anywhere,
+		NoPort: s.NoPort, Relay: s.RelayOn, RelayURL: s.RelayURL, RelayVia: s.RelayVia}
+}
+
+// relayDialer is how this machine reaches a relay: from the saved
+// server via, or from here when it is empty, and through the HTTP proxy
+// set, or the one the system names. refused, when set, keeps a sign-in
+// to via turned down from being asked for again.
+func (a *app) relayDialer(via machines.ID, refused *throughRefused) relay.Dialer {
+	set := ""
+	if a.settings != nil {
+		set = a.settings.Proxy()
+	}
+	pick, err := relay.Proxy(set)
+	if err != nil {
+		// Checked as it was set, so only a file edited by hand gets
+		// here: said, and the system's taken instead.
+		log.Printf("the proxy set for relays cannot be used, so the system's is: %v", err)
+		pick, _ = relay.Proxy("")
+	}
+	d := relay.Dialer{Proxy: pick}
+	if via != "" {
+		d.Dial = a.dialThrough(via, refused)
+	}
+	return d
+}
+
+// setRelayProxy sets the HTTP proxy relays are reached through.
+func (a *app) setRelayProxy(proxy string) error {
+	proxy = strings.TrimSpace(proxy)
+	if _, err := relay.ParseProxy(proxy); err != nil {
+		return err
+	}
+	if a.settings == nil {
+		return errors.New("the settings could not be read, so the proxy cannot be kept")
+	}
+	if err := a.settings.PutProxy(proxy); err != nil {
+		return err
+	}
+	a.showServing()
+	return nil
 }

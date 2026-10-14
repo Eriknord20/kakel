@@ -3,6 +3,7 @@ package view
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/marrasen/kakel/app"
@@ -423,11 +424,14 @@ func (w *Window) tabTitle(t app.Tab) string {
 
 // tabShort is what tab t says where its title does not fit: the pane's
 // own title, where the tab's names the machine before it, as "web:
-// logs" does, and "" where nothing is shorter.
+// logs" does, and "" where nothing is shorter. A title naming the
+// machine after, as "PowerShell on XPS25" does, has none: faded where
+// it is cut, it still shows where the machine's name starts, as the
+// pane's own title alone would not.
 func (w *Window) tabShort(t app.Tab) string {
 	for _, p := range w.panes {
 		if p.ID == t.Pane {
-			if p.Title != "" && p.Title != w.titleOf(p) {
+			if full := w.titleOf(p); p.Title != "" && p.Title != full && strings.HasSuffix(full, p.Title) {
 				return p.Title
 			}
 			return ""

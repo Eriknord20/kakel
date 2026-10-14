@@ -2,6 +2,7 @@ package machines
 
 import (
 	"context"
+	"github.com/marrasen/kakel/relay"
 	"maps"
 	"slices"
 	"strings"
@@ -53,7 +54,10 @@ type Machine struct {
 	// offering to connect to a dropped window again.
 	Dropped bool
 	LetGo   bool
-	Lost    context.CancelFunc
+	// Behind is the kakel window its connection goes through, empty
+	// for one that goes through none: it ends when that window goes.
+	Behind ID
+	Lost   context.CancelFunc
 }
 
 // empty reports whether nothing is kept on the machine any more.
@@ -66,6 +70,9 @@ func (m *Machine) empty() bool {
 type Window struct {
 	Serve         *serve.Window
 	Addr, KeyFile string
+	// Via is the saved server it is reached through, empty for this
+	// machine.
+	Via ID
 	// Bound is the pane here showing each thing it has open, by its ID
 	// there.
 	Bound map[string]string
@@ -169,7 +176,9 @@ func (r *Registry) Name(id ID) string {
 	case id == Local:
 		return "this computer"
 	case r.quick[id].target != "":
-		return r.quick[id].target
+		// A window through a relay by its code, and not the relay's
+		// secret.
+		return relay.Shown(r.quick[id].target)
 	}
 	if b := r.book(); b != nil {
 		if name, ok := b.NameOf(string(id)); ok {
@@ -218,7 +227,9 @@ func (r *Registry) Find(name string) (ID, bool) {
 		}
 	}
 	for id, q := range r.quick {
-		if q.target == name {
+		// By what it is called too: a window through a relay goes by
+		// its code, as Name gives it.
+		if q.target == name || relay.Shown(q.target) == name {
 			return id, true
 		}
 	}
@@ -294,7 +305,10 @@ func (r *Registry) Infos() []Info {
 		}
 	}
 	for id, q := range r.quick {
-		out = append(out, Info{ID: id, Name: q.target, Quick: true, Window: q.window, Target: q.target})
+		// Shown by its code, for a window through a relay, and never
+		// with the relay's secret.
+		shown := relay.Shown(q.target)
+		out = append(out, Info{ID: id, Name: shown, Quick: true, Window: q.window, Target: shown})
 	}
 	for id, name := range r.far {
 		out = append(out, Info{ID: id, Name: name})

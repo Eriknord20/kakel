@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/aymanbagabas/go-pty v0.2.3
+	github.com/coder/websocket v1.8.15
 	// marrasen/go-vte is upstream danielgatis/go-vte v1.0.11 with two
 	// changes. The parser hands a performer its own params and
 	// intermediates, reused from one sequence to the next, where it
@@ -44,5 +45,6 @@ require (
 	golang.design/x/x11 v0.2.0 // indirect
 	golang.org/x/exp/shiny v0.0.0-20250606033433-dcc06ee1d476 // indirect
 	golang.org/x/mobile v0.0.0-20250606033058-a2a15c67f36f // indirect
+	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )

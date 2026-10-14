@@ -88,6 +88,31 @@ type AskFact struct{ Label, Name, Note string }
 // connection quietly.
 var errDeclined = errors.New("kakel: declined")
 
+// orAsking is then, for one waiting on a connection already on its way
+// that may ask what that one could not: when that one failed for want
+// of asking, again tries once more, asking, and then hears how that
+// went.
+func (a *app) orAsking(noAsk bool, again func() error, then func(error)) func(error) {
+	if noAsk {
+		return then
+	}
+	return func(err error) {
+		if !errors.Is(err, errNoAsking) {
+			then(err)
+			return
+		}
+		if err := again(); err != nil {
+			then(err)
+		}
+	}
+}
+
+// noAsking marks the context of a connection that asks nothing.
+type noAsking struct{}
+
+// errNoAsking is why a connection that asks nothing did not connect.
+var errNoAsking = errors.New("signing in needs a question answered on this machine, and none is asked for a connection nobody here started; connect it here first")
+
 // connect connects to a server, through the jump hosts a saved one
 // names, and opens a shell there once it is connected.
 func (a *app) connect(in ConnectTo) error { return a.connectThen(in, nil) }
@@ -101,6 +126,10 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 	// a typed target; shown is what each is called.
 	var names []machines.ID
 	var shown []string
+	// behind is the index of the kakel window the hops after it go
+	// through, -1 for none, and first dials from its machine.
+	behind := -1
+	var first func(ctx context.Context, addr string) (net.Conn, error)
 	name := in.Server
 	if in.Server != "" {
 		if a.book == nil {
@@ -116,7 +145,41 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 			if len(last.Identities) > 0 {
 				key = last.Identities[0]
 			}
-			return a.reachWindow(ConnectWindow{Addr: last.ServeAddr(), KeyFile: key, ID: machines.ID(last.ID), Only: in.Only}, in.Quiet, then)
+			return a.reachWindow(ConnectWindow{Addr: last.ServeAddr(), KeyFile: key, ID: machines.ID(last.ID), Only: in.Only, NoAsk: in.NoAsk}, in.Quiet, then)
+		}
+		// Behind a kakel window: the window first, connected to as a
+		// window, and the hops after it dialled from its machine.
+		for k := len(hosts) - 2; k >= 0; k-- {
+			if !hosts[k].Window {
+				continue
+			}
+			win := machines.ID(hosts[k].ID)
+			w := a.machines.Get(win).Window
+			if w == nil {
+				return a.reachWindow(ConnectWindow{ID: win, Addr: hosts[k].ServeAddr(), KeyFile: hosts[k].KeyFile(), Only: true, NoAsk: in.NoAsk}, true, func(err error) {
+					if err == nil {
+						err = a.connectThen(in, then)
+						if err == nil {
+							return
+						}
+					} else {
+						err = fmt.Errorf("through %s: %w", a.machines.Name(win), err)
+					}
+					// Said as the dial says it: to whoever asked when
+					// someone waits, and in a toast otherwise.
+					if then != nil {
+						then(err)
+						return
+					}
+					if !in.Quiet && !errors.Is(err, errDeclined) && !errors.Is(err, context.Canceled) {
+						a.failed("Couldn't connect to "+a.machines.Name(name), err.Error())
+						a.problem()
+					}
+				})
+			}
+			behind = k
+			first = func(ctx context.Context, addr string) (net.Conn, error) { return w.Serve.DialOn(ctx, "", addr) }
+			break
 		}
 		for _, h := range hosts {
 			hops = append(hops, h.Config())
@@ -160,13 +223,16 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 	if a.machines.Get(name).Dialing != nil {
 		if in.Quiet && then != nil {
 			// The one on its way will do: nobody is asked.
-			a.machines.At(name).Waiters = append(a.machines.At(name).Waiters, then)
+			a.machines.At(name).Waiters = append(a.machines.At(name).Waiters, a.orAsking(in.NoAsk, func() error { return a.connectThen(in, then) }, then))
 			return nil
 		}
 		a.askAboutTheOneOnItsWay(in, name, then)
 		return nil
 	}
 	dctx, cancel := context.WithCancel(a.ctx)
+	if in.NoAsk {
+		dctx = context.WithValue(dctx, noAsking{}, true)
+	}
 	a.machines.At(name).Dialing = cancel
 	acct := a.dialLog(name)
 	logLine(acct, "", "connecting to "+called)
@@ -191,11 +257,16 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 	// From the nearest hop already connected, so a second server behind
 	// a jump host does not sign in to the jump host again.
 	start, from := a.machines.HopConnected(names, hops)
+	if behind >= 0 && from <= behind {
+		// Nothing past the window connected yet: from the window. A hop
+		// before it is the window's way in, not one to dial through.
+		start, from = nil, behind+1
+	}
 	// Held while the dial goes through it, so it does not close under
 	// the dial when what else went through it goes.
 	a.machines.Hold(start)
 	go func() {
-		conn, made, err := machines.DialFrom(dctx, start, from, hops, shown)
+		conn, made, err := machines.DialFromBy(dctx, start, from, hops, shown, first)
 		a.events <- func() {
 			defer a.machines.Release(start)
 			a.machines.At(name).Dialing = nil
@@ -232,6 +303,10 @@ func (a *app) connectThen(in ConnectTo, then func(error)) error {
 			}
 			m := a.machines.At(name)
 			m.Conn, m.SavedID = conn, savedID
+			m.Behind = ""
+			if behind >= 0 {
+				m.Behind = names[behind]
+			}
 			m.Since, m.RTT = time.Now(), 0
 			a.machines.KeepHops(conn, names, hops, made)
 			m.Dropped = false
@@ -332,6 +407,9 @@ func (a *app) askAboutTheOneOnItsWay(in ConnectTo, name machines.ID, then func(e
 // ask shows q and waits for the answer, or for ctx to end, which takes
 // the question away. It runs on a connection's goroutine.
 func (a *app) ask(ctx context.Context, q Ask) (AskAnswered, error) {
+	if ctx.Value(noAsking{}) != nil {
+		return AskAnswered{}, errNoAsking
+	}
 	q.ID = a.askIDs.Add(1)
 	reply := make(chan AskAnswered, 1)
 	a.events <- func() {
@@ -589,8 +667,12 @@ func loginHost(hostPort string) string {
 
 // TrustHostKey implements [remote.Ask].
 func (q asker) TrustHostKey(ctx context.Context, k remote.HostKey) (bool, error) {
+	who := k.Addr
+	if k.Shown != "" {
+		who = k.Shown
+	}
 	text := fmt.Sprintf("%s is new to this computer. Its %s key has the fingerprint %s. Connect only if that matches the one its owner gave you.",
-		k.Addr, k.Type(), k.Fingerprint())
+		who, k.Type(), k.Fingerprint())
 	// Careful: it opens on Cancel, as the one question where yes by
 	// reflex is the answer that cannot be taken back.
 	ans, err := q.a.ask(ctx, Ask{Title: "Trust this server?", Text: text, Yes: "Trust and Connect", Careful: true, Icon: "shield-alert"})

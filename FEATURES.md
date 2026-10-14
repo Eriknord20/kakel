@@ -27,6 +27,17 @@ The whole list. The [README](README.md) has the short version.
   key but saying yes to its fingerprint, and a host key that changed is a
   hard failure. The window being served keeps drawing and says who is
   working in it. Closing the connection gives it its screen back.
+- **Through a relay, when neither can reach the other.** `kakel -relay`
+  runs on a server with no screen. A window served through it gets a
+  code, kept from one run to the next, and a window connecting gives the
+  relay that code. Both reach it over WebSockets on HTTPS, which gets
+  through HTTP proxies. The relay only carries bytes: the windows speak
+  SSH through it, the keys allowed in are the same, and the host key is
+  checked as for any window.
+- **Tunnels for plain ssh.** `ssh -N -L`, `-J` and `-W` work against a
+  served window, with the keys it allows. The user name picks where the
+  tunnel goes out from: the served machine, or a machine saved there,
+  connected to on the way when nothing has to be asked.
 - **Working in a shell that is already running over there.** The served
   window says what it has open, and choosing one of those rows opens a
   pane here on the program that is already running there, starting with
@@ -67,7 +78,10 @@ The whole list. The [README](README.md) has the short version.
   behind another one. The second connection is carried inside a channel
   of the first, so no local port is opened for it and nothing else on
   the machine can use it. Closing the one in the middle closes what
-  rides on it.
+  rides on it. A saved server can be behind a kakel window too, served
+  directly or through a relay: the window opens the stream from its own
+  machine, so a server on that machine's network is reached from
+  anywhere the window is.
 - **Tabs.** Each window holds tabs, and each tab a pane or a split. New
   Terminal opens one, and the tab bar shows in the title bar once there
   are two. Click a tab to show it. Middle-click it, or click its ×, to

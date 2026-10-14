@@ -174,7 +174,8 @@ func TestEditingAServerKeepsItsKeysAndRefusesATakenName(t *testing.T) {
 	}
 }
 
-// A window's form greys out what a window has none of, calls a window
+// A window's form greys out what a window has none of, offers the
+// servers to reach it through, calls a window
 // what the message about one does, and keeps a server's key to offer
 // next time.
 func TestTheServerFormFitsItsType(t *testing.T) {
@@ -207,7 +208,9 @@ func TestTheServerFormFitsItsType(t *testing.T) {
 			}
 		}
 	}
-	if via == nil || forward == nil || !via.Disabled || !forward.Disabled {
+	// A window, or its relay, can be reached through a saved server;
+	// it carries no agent.
+	if via == nil || forward == nil || via.Disabled || !forward.Disabled {
 		t.Fatalf("for a window, Through is %+v and the agent box %+v", via, forward)
 	}
 	if kind == nil {

@@ -58,6 +58,10 @@ type Config struct {
 	// up reachable from the network.
 	Addr string
 
+	// Listeners are more places to take connections from, as a relay
+	// hands them over. Addr may be empty when there is one.
+	Listeners []net.Listener
+
 	// HostKey is what a client checks this machine by.
 	HostKey ssh.Signer
 
@@ -110,6 +114,12 @@ type Config struct {
 	// this machine. A nil one refuses, and a client is told so.
 	OpenOn func(host, command, dir string, cols, rows int) (session.Session, Attached, error)
 
+	// DialAs opens a stream to addr for a plain SSH client's tunnel,
+	// ssh -L or ssh -J, from the machine the user name it logged in with
+	// names: a saved machine this window reaches, or this machine for
+	// "kakel". A nil one refuses, and the client is told so.
+	DialAs func(ctx context.Context, c *Client, addr string) (net.Conn, error)
+
 	// Dial opens a stream to addr from a machine this window reaches,
 	// host as its Open named it, "" for this machine, for a tunnel a
 	// client holds. A nil one refuses, and the client is told so.
@@ -161,6 +171,11 @@ type Client struct {
 
 	// Addr is where they connected from.
 	Addr string
+
+	// User is the user name they logged in with. A kakel window sends
+	// its own; to plain ssh it names the machine its tunnels go out
+	// from.
+	User string
 
 	// At is when they arrived.
 	At time.Time
@@ -222,7 +237,10 @@ func (c *Client) Close() error {
 // nobody allowed to connect.
 type Server struct {
 	cfg Config
+	// ln is the port listened on, nil when there is none, and lns are
+	// every place connections come from, the port among them.
 	ln  net.Listener
+	lns []net.Listener
 	// allowed are the keys that may connect now: cfg's, until
 	// SetAllowed changes them.
 	allowed atomic.Pointer[Allowed]
@@ -261,23 +279,30 @@ func Listen(cfg Config) (*Server, error) {
 	case cfg.Allowed.Len() == 0:
 		return nil, errors.New(
 			"serve: no keys are allowed to connect, so there is nobody to serve")
-	case cfg.Addr == "":
+	case cfg.Addr == "" && len(cfg.Listeners) == 0:
 		return nil, errors.New("serve: no address to listen on")
 	}
 
 	s := &Server{cfg: cfg, arriving: map[net.Conn]struct{}{}}
 	s.allowed.Store(cfg.Allowed)
-	ln, err := net.Listen("tcp", cfg.Addr)
-	if err != nil {
-		return nil, fmt.Errorf("serve: listen on %s: %w", cfg.Addr, err)
+	if cfg.Addr != "" {
+		ln, err := net.Listen("tcp", cfg.Addr)
+		if err != nil {
+			return nil, fmt.Errorf("serve: listen on %s: %w", cfg.Addr, err)
+		}
+		s.ln = ln
+		s.lns = append(s.lns, ln)
 	}
-	s.ln = ln
-	go s.accept()
+	s.lns = append(s.lns, cfg.Listeners...)
+	for _, ln := range s.lns {
+		go s.accept(ln)
+	}
 	return s, nil
 }
 
 // Addr is where the server is listening, which is not always what it
-// was asked for: a port of 0 is whichever one the system gave it.
+// was asked for: a port of 0 is whichever one the system gave it. It is
+// empty when the server takes connections from Listeners alone.
 func (s *Server) Addr() string {
 	if s == nil || s.ln == nil {
 		return ""
@@ -329,7 +354,10 @@ func (s *Server) Close() error {
 	clear(s.arriving)
 	s.mu.Unlock()
 
-	err := s.ln.Close()
+	var err error
+	for _, ln := range s.lns {
+		err = errors.Join(err, ln.Close())
+	}
 	for _, c := range clients {
 		if got := c.Close(); got != nil {
 			err = errors.Join(err, got)
@@ -345,9 +373,9 @@ func (s *Server) Close() error {
 }
 
 // accept takes connections until the listener is closed.
-func (s *Server) accept() {
+func (s *Server) accept(ln net.Listener) {
 	for {
-		nc, err := s.ln.Accept()
+		nc, err := ln.Accept()
 		if err == nil {
 			go s.handshake(nc)
 			continue
@@ -360,7 +388,7 @@ func (s *Server) accept() {
 		// carrying on looking like a window that can still be reached.
 		_ = s.Close()
 		if s.cfg.OnStopped != nil {
-			s.cfg.OnStopped(fmt.Errorf("serve: stopped listening on %s: %w", s.Addr(), err))
+			s.cfg.OnStopped(fmt.Errorf("serve: stopped listening on %s: %w", ln.Addr(), err))
 		}
 		return
 	}
@@ -461,7 +489,7 @@ func (s *Server) handshake(nc net.Conn) {
 		signed = conn.Permissions.Extensions[keyExt]
 	}
 
-	c := &Client{Name: who, Addr: conn.RemoteAddr().String(), At: time.Now(), conn: conn, key: signed}
+	c := &Client{Name: who, Addr: conn.RemoteAddr().String(), User: conn.User(), At: time.Now(), conn: conn, key: signed}
 	if !s.add(c) {
 		// Closed while this one was authenticating.
 		_ = conn.Close()

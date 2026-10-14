@@ -17,12 +17,15 @@ import (
 	"runtime/pprof"
 	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/marrasen/kakel/view"
 
 	"github.com/marrasen/kakel/app"
+	"github.com/marrasen/kakel/conf"
 	"github.com/marrasen/kakel/internal/sound"
+	"github.com/marrasen/kakel/relay"
 
 	"github.com/marrasen/kakel/look"
 
@@ -42,6 +45,22 @@ import (
 )
 
 func main() {
+	// A relay has no window and is never installed: it runs on a server
+	// with no screen, from wherever it was put.
+	if relay.Asked(os.Args[1:]) {
+		if err := runRelay(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	// Nor has a pipe to a window through a relay, which ssh starts as
+	// its ProxyCommand.
+	if relay.PipeAsked(os.Args[1:]) {
+		if err := relay.Pipe(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	// A kakel started from anywhere but its own folder opens gunim's
 	// installer, and `kakel -install` and `kakel -uninstall` are done
 	// there; the installed one goes on.
@@ -57,6 +76,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// runRelay runs kakel as a relay until it is interrupted or stopped.
+func runRelay() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	dir, err := conf.Private()
+	if err != nil {
+		return err
+	}
+	return relay.Main(ctx, os.Args[1:], dir, os.Stderr)
 }
 
 func run() error {

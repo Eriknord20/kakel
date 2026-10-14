@@ -181,6 +181,97 @@ machine's, and Remove Key… takes one off and hangs up on the window it
 let in. If you made that file a link to `~/.ssh/authorized_keys`, the
 keys added here may log in over ssh too.
 
+### Through a relay
+
+When the other machine cannot reach this one, serve through a relay
+(see below). Tick "Through a relay" in the Serve dialog and paste the
+relay's URL. Kakel makes a code, such as `7KQ2-M9XD`, and keeps it in
+`relay_code` beside the serving key, so it is the same every time this
+window is served and each machine has its own. The other end types
+that code. Copy Link puts the relay's URL and the code on the
+clipboard, for pasting at the other end in one go. New Code makes
+another; the old one lets nobody else in. Untick "On a port of this
+machine" to serve through the relay alone. The keys that may connect
+are the same either way.
+
+At the other end, "Connect to Window…" with "Through a relay" takes the
+relay's URL and the code; pasting the copied link into either field
+fills in both. The relay used last is offered again. A window saved in
+the server list as a kakel window takes the relay's URL as its address
+and the code in Code. The host key is checked as for any window, under
+the code and the relay's name: a new code is a new window to trust.
+
+Both dialogs have a Through choice: a saved server to reach the relay,
+or the window itself, through, as a server saved behind another one is
+reached. The stream goes out from that server over the SSH connection
+to it, which kakel makes first when it is not connected. A saved kakel
+window takes a Through as well.
+
+Kakel reaches a relay through the HTTP proxy that `HTTPS_PROXY` names
+or, on Windows, the one set for the system. Settings › Sharing ›
+Relays › Proxy overrides both: a URL such as
+`http://user:password@proxy:8080`, or `none` to go straight there. A
+proxy found only through a PAC script, or one that signs in with
+Windows (NTLM or Kerberos), is not supported yet.
+
+### Tunnels with plain ssh
+
+A served window also takes ssh's own tunnels, with the same keys and
+the same host key. There is no shell, so give `-N`:
+
+    ssh -p 2222 -N -L 8080:intranet:80 kakel@office-pc
+
+That makes port 8080 here reach `intranet` port 80 as the served
+machine finds it. `-J` and `-W` work the same way. The user name says
+where the tunnel goes out from: `kakel` for the served machine itself,
+or a machine saved there, by its name as the commands spell it
+(`db-server` for "DB Server"):
+
+    ssh -p 2222 -N -L 5432:localhost:5432 db-server@office-pc
+
+At first a tunnel reaches what a kakel window connecting reaches: the
+servers connected over there already. Turn on Settings › Sharing ›
+Tunnels may connect, on the served machine, and a saved server not
+connected is connected to on the way, when that needs nothing asked: a
+key, or a secret while the secrets are open. A question would wait on
+a screen nobody may be at, so the tunnel is refused instead, saying to
+connect it there first. With it on, a kakel window connected over there
+can be gone through too.
+
+Through a relay, ssh runs kakel to reach it:
+
+    ssh -o ProxyCommand="kakel -relay-pipe https://relay.example.com/k/…#7KQ2-M9XD" -N -L 8080:intranet:80 kakel@office-pc
+
+`-relay-pipe` takes `-proxy` for an HTTP proxy, or uses the system's.
+
+"Tunnels with ssh…", on the Share menu, in the served dialog and in
+Settings › Sharing, explains all this with the commands filled in for
+this window: its port, its name, its relay and the machines saved here,
+each with a Copy beside it.
+
+## Running a relay
+
+A relay joins two kakel windows that cannot reach each other: both
+reach the relay instead, over WebSockets on HTTPS, which gets through
+HTTP proxies. It runs on a server with no screen:
+
+    kakel -relay -domain relay.example.com
+
+That gets a certificate from Let's Encrypt, so ports 443 and 80 must be
+reachable. Behind nginx or Caddy doing HTTPS, run it on plain HTTP
+instead and point the proxy at it, passing WebSocket upgrades:
+
+    kakel -relay -listen 127.0.0.1:8080
+
+It prints its URL, ending in `/k/` and a secret. Without the secret the
+relay answers nothing, so keep the URL to the people who should use it.
+The secret is kept in `relay_secret` in kakel's private directory (or
+`-dir`); `-new-secret` makes a new one and the old URL stops working.
+
+The relay only carries bytes. The windows speak SSH to each other
+through it, so it cannot read what passes, and the served window still
+lets in only the keys it lists.
+
 ## Where kakel keeps its files
 
 Kakel keeps its files where the operating system puts a program's.
