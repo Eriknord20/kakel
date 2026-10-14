@@ -11,6 +11,20 @@ change how something behaves.
 
 ### Added
 
+**Disk usage, to see what takes the room in a folder.** Pick View ›
+Disk usage in the file manager, or Disk usage on a folder's menu. It
+reads everything under the folder, on this computer or on any machine
+the file manager reaches, and shows it three ways: boxes sized by what
+each item holds, a tree of the folders with their sizes, and the types
+of file. Double-click a box to go into its folder, and Backspace to come
+back out. Files that OneDrive or another cloud provider keeps are
+counted apart: what is only online, what is on this device and could be
+freed, and what is always kept here. The boxes can be sized by what is
+on this device or by what is online, and coloured by cloud, to find the
+folders that hold the most offline files. Show in Files takes you to an
+item in the file list. On Windows, right-click an item in a OneDrive
+folder for Free up space or Always keep on this device, as in Explorer.
+
 **The file manager's filter can look in the folders under this one.**
 Click the button beside the filter field, or pick Go › Filter
 subfolders too. What you type then finds matching items anywhere under
