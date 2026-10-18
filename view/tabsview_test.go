@@ -14,7 +14,7 @@ import (
 	"github.com/marrasen/gunim/filemanager"
 	"github.com/marrasen/gunim/geom"
 	gi "github.com/marrasen/gunim/input"
-	"github.com/marrasen/gunim/text"
+	"github.com/marrasen/gunim/widget/dock"
 )
 
 // twoTabs is a window with two tabs, p1's in front, and p2's.
@@ -48,15 +48,39 @@ func drain() {
 	}
 }
 
+// tabRect is where tab i stands, in the window's space.
+func tabRect(t *testing.T, win *Window, i int) geom.Rect {
+	t.Helper()
+	r, ok := lastUI.Bounds(win.tabs.bar)
+	if !ok || i >= len(win.tabs.tabs) {
+		t.Fatalf("the tab bar is not drawn, or has no tab %d", i)
+	}
+	rc, ok := win.tabs.bar.TabRect(tabID(win.tabs.tabs[i].Group))
+	if !ok {
+		t.Fatalf("tab %d is not laid out", i)
+	}
+	return rc.Add(r.Min)
+}
+
 // tabAt is the middle of tab i, in the window's space.
 func tabAt(t *testing.T, win *Window, i int) geom.Point {
 	t.Helper()
-	r, ok := lastUI.Bounds(win.tabs)
-	if !ok || i >= len(win.tabs.boxes) {
-		t.Fatalf("the tab bar is not drawn, or has no tab %d", i)
-	}
-	return win.tabs.boxes[i].Center().Add(r.Min)
+	return tabRect(t, win, i).Center()
 }
+
+// plusAt is the middle of the bar's +, in the window's space.
+func plusAt(t *testing.T, win *Window) geom.Point {
+	t.Helper()
+	r, ok := lastUI.Bounds(win.tabs.bar)
+	if !ok {
+		t.Fatal("the tab bar is not drawn")
+	}
+	return win.tabs.bar.PlusRect().Center().Add(r.Min)
+}
+
+// captionLeast is the room a bar in the title bar leaves after its +
+// to move the window by, as gunim's has it.
+const captionLeast = 64
 
 // click presses and lets go the primary button at p.
 func click(p geom.Point, b gi.Button) {
@@ -86,22 +110,22 @@ func TestTheTabBarShowsWithOneTab(t *testing.T) {
 		t.Fatalf("a frame after the first tab came, the bar shows %v and the title is %v there", b.shown(), b.titleFade.Value())
 	}
 	settle()
-	if !b.shown() || win.bar.Subtitle != "" || win.bar.Title != "" || b.fade.Value() != 1 || len(b.boxes) != 1 {
-		t.Fatalf("with one tab the bar shows %v with %d tabs, %v faded in, and the title bar says %q, %q", b.shown(), len(b.boxes), b.fade.Value(), win.bar.Title, win.bar.Subtitle)
+	if !b.shown() || win.bar.Subtitle != "" || win.bar.Title != "" || b.fade.Value() != 1 || len(b.bar.Tabs()) != 1 {
+		t.Fatalf("with one tab the bar shows %v with %d tabs, %v faded in, and the title bar says %q, %q", b.shown(), len(b.bar.Tabs()), b.fade.Value(), win.bar.Title, win.bar.Subtitle)
 	}
 	publish(twoTabs())
 	settle()
-	if !b.shown() || len(b.boxes) != 2 || b.front != 1 {
-		t.Fatalf("with two tabs the bar shows %v with %d tabs, %d in front", b.shown(), len(b.boxes), b.front)
+	if !b.shown() || len(b.bar.Tabs()) != 2 || b.front != 1 || b.bar.Front() != "1" {
+		t.Fatalf("with two tabs the bar shows %v with %d tabs, %d in front", b.shown(), len(b.bar.Tabs()), b.front)
 	}
 	publish(one)
 	frames(2)
-	if !b.shown() || b.fade.Value() != 1 || len(b.gone) != 1 {
-		t.Fatalf("a frame after the second tab closed, the bar shows %v, %v faded, with %d tabs going", b.shown(), b.fade.Value(), len(b.gone))
+	if !b.shown() || b.fade.Value() != 1 || len(b.bar.Tabs()) != 1 {
+		t.Fatalf("a frame after the second tab closed, the bar shows %v, %v faded, with %d tabs", b.shown(), b.fade.Value(), len(b.bar.Tabs()))
 	}
 	settle()
-	if !b.shown() || len(b.boxes) != 1 || len(b.gone) != 0 || win.bar.Subtitle != "" {
-		t.Fatalf("back to one tab the bar shows %v with %d tabs, %d going, the title bar says %q", b.shown(), len(b.boxes), len(b.gone), win.bar.Subtitle)
+	if !b.shown() || len(b.bar.Tabs()) != 1 || win.bar.Subtitle != "" {
+		t.Fatalf("back to one tab the bar shows %v with %d tabs, the title bar says %q", b.shown(), len(b.bar.Tabs()), win.bar.Subtitle)
 	}
 }
 
@@ -119,17 +143,20 @@ func TestTheTabsAnswerTheMouse(t *testing.T) {
 	if in, ok := nextIntent(t).(app.CloseTab); !ok || in.Group != 2 {
 		t.Fatalf("a middle click sent %#v", in)
 	}
-	r, _ := lastUI.Bounds(win.tabs)
-	click(win.tabs.crossOf(0).Center().Add(r.Min), gi.ButtonPrimary)
+	// The × shows on the tab in front, and on the one under the pointer.
+	first := tabRect(t, win, 0)
+	cross := geom.Pt(first.Max.X-dock.TabPadding.Default()-4, first.Center().Y)
+	lastWindow.Input(gi.PointerMove{Pos: cross})
+	click(cross, gi.ButtonPrimary)
 	if in, ok := nextIntent(t).(app.CloseTab); !ok || in.Group != 1 {
 		t.Fatalf("a click on the × sent %#v", in)
 	}
-	click(win.tabs.plus.Center().Add(r.Min), gi.ButtonPrimary)
+	click(plusAt(t, win), gi.ButtonPrimary)
 	if in, ok := nextIntent(t).(app.NewTab); !ok {
 		t.Fatalf("a click on the + sent %#v", in)
 	}
 	// A right click offers a terminal or a file manager.
-	click(win.tabs.plus.Center().Add(r.Min), gi.ButtonSecondary)
+	click(plusAt(t, win), gi.ButtonSecondary)
 	if win.tabs.plusMenu == nil {
 		t.Fatal("a right click on the + opened no menu")
 	}
@@ -142,18 +169,19 @@ func TestATabLetGoOutsideAsksForAWindow(t *testing.T) {
 	publish(twoTabs())
 	drain()
 	at := tabAt(t, win, 1)
+	grab := at.Sub(tabRect(t, win, 1).Min)
 	lastWindow.Input(gi.PointerDown{Pos: at, Button: gi.ButtonPrimary})
 	lastWindow.Input(gi.PointerMove{Pos: at.Add(geom.Pt(20, 30))})
 	lastWindow.Frame(time.Second / 60)
-	if win.tabs.carried != 2 {
-		t.Fatalf("the tab did not lift off: %d is carried", win.tabs.carried)
+	if win.tabs.bar.Carried() != "2" {
+		t.Fatalf("the tab did not lift off: %q is carried", win.tabs.bar.Carried())
 	}
-	win.tabs.Handle(gi.DragEnd{Out: true, At: geom.Pt(1200, 300)}, lastUI)
+	win.tabs.bar.Handle(gi.DragEnd{Out: true, At: geom.Pt(1200, 300)}, lastUI)
 	in, ok := nextIntent(t).(app.TabToNewWindow)
-	if !ok || in.Group != 2 || in.At != geom.Pt(1200, 300).Sub(win.tabs.grab) || in.Size != win.size {
+	if !ok || in.Group != 2 || in.At != geom.Pt(1200, 300).Sub(grab) || in.Size != win.size {
 		t.Fatalf("let go outside, the bar sent %#v", in)
 	}
-	if win.tabs.carried != 0 {
+	if win.tabs.bar.Carried() != "" {
 		t.Fatal("the tab is still carried")
 	}
 }
@@ -164,14 +192,13 @@ func TestATabDroppedOnTheBarMovesThere(t *testing.T) {
 	win, _, publish := windowStage(t)
 	publish(twoTabs())
 	drain()
-	r, _ := lastUI.Bounds(win.tabs)
-	first := win.tabs.boxes[0]
-	lastWindow.Input(gi.Drop{Pos: geom.Pt(first.Min.X+4, first.Center().Y).Add(r.Min), Data: app.TabDrag{Group: 2, Window: 1}})
+	first := tabRect(t, win, 0)
+	lastWindow.Input(gi.Drop{Pos: geom.Pt(first.Min.X+4, first.Center().Y), Data: dock.Drag{ID: "2", Win: 1}})
 	lastWindow.Frame(time.Second / 60)
 	if in, ok := nextIntent(t).(app.MoveTab); !ok || in.Group != 2 || in.Before != 1 {
 		t.Fatalf("dropped before the first tab, the bar sent %#v", in)
 	}
-	lastWindow.Input(gi.Drop{Pos: geom.Pt(win.tabs.plus.Min.X, first.Center().Y).Add(r.Min), Data: app.TabDrag{Group: 9, Window: 3}})
+	lastWindow.Input(gi.Drop{Pos: geom.Pt(plusAt(t, win).X-10, first.Center().Y), Data: dock.Drag{ID: "9", Win: 3}})
 	lastWindow.Frame(time.Second / 60)
 	if in, ok := nextIntent(t).(app.MoveTab); !ok || in.Group != 9 || in.Before != 0 {
 		t.Fatalf("dropped after the last tab, the bar sent %#v", in)
@@ -189,15 +216,15 @@ func TestATabDroppedOnAPaneDocks(t *testing.T) {
 		t.Fatal("the pane is not drawn")
 	}
 	left := geom.Pt(r.Min.X+10, r.Center().Y)
-	if !win.tabDrop(gi.DragOver{Pos: left, Data: app.TabDrag{Group: 2, Window: 1}}, lastUI) || win.dock.pane != "p1" || !win.dock.first || win.dock.vertical {
+	if !win.tabDrop(gi.DragOver{Pos: left, Data: dock.Drag{ID: "2", Win: 1}}, lastUI) || win.dock.pane != "p1" || !win.dock.first || win.dock.vertical {
 		t.Fatalf("over the pane's left edge, the dock is %+v", win.dock)
 	}
-	lastWindow.Input(gi.Drop{Pos: geom.Pt(r.Center().X, r.Max.Y-10), Data: app.TabDrag{Group: 2, Window: 1}})
+	lastWindow.Input(gi.Drop{Pos: geom.Pt(r.Center().X, r.Max.Y-10), Data: dock.Drag{ID: "2", Win: 1}})
 	lastWindow.Frame(time.Second / 60)
 	if in, ok := nextIntent(t).(app.DockTab); !ok || in.Group != 2 || in.Beside != "p1" || !in.Vertical || in.First {
 		t.Fatalf("dropped at the pane's bottom edge, the window sent %#v", in)
 	}
-	if win.tabDrop(gi.DragOver{Pos: left, Data: app.TabDrag{Group: 1, Window: 1}}, lastUI) {
+	if win.tabDrop(gi.DragOver{Pos: left, Data: dock.Drag{ID: "1", Win: 1}}, lastUI) {
 		t.Fatal("the window took a tab over its own pane")
 	}
 }
@@ -217,8 +244,8 @@ func TestTheBarWorksAfterLosingTheTabMidDrag(t *testing.T) {
 	publish(one)
 	lastWindow.Input(gi.PointerUp{Pos: at.Add(geom.Pt(20, 30)), Button: gi.ButtonPrimary})
 	lastWindow.Frame(time.Second / 60)
-	if win.tabs.carried != 0 || win.tabs.pressed != -1 {
-		t.Fatalf("its tab gone, the bar still carries %d, pressed %d", win.tabs.carried, win.tabs.pressed)
+	if win.tabs.bar.Carried() != "" {
+		t.Fatalf("its tab gone, the bar still carries %q", win.tabs.bar.Carried())
 	}
 	publish(twoTabs())
 	drain()
@@ -244,14 +271,14 @@ func TestManyTabsKeepTheBarUsable(t *testing.T) {
 	}
 	publish(st)
 	drain()
-	r, _ := lastUI.Bounds(win.tabs)
-	if win.tabs.plus.Max.X > r.Size().W {
-		t.Fatalf("the + ends at %.0f on a bar %.0f wide", win.tabs.plus.Max.X, r.Size().W)
+	r, _ := lastUI.Bounds(win.tabs.bar)
+	if plus := win.tabs.bar.PlusRect(); plus.Max.X > r.Size().W {
+		t.Fatalf("the + ends at %.0f on a bar %.0f wide", plus.Max.X, r.Size().W)
 	}
-	if got := win.tabs.CaptionRects(r.Size()); len(got) != 1 || got[0].Size().W < captionLeast-1 {
+	if got := win.tabs.bar.CaptionRects(r.Size()); len(got) != 1 || got[0].Size().W < captionLeast-1 {
 		t.Fatalf("the bar leaves %v to move the window by", got)
 	}
-	icon := win.tabs.boxes[3].Center().Add(r.Min)
+	icon := tabAt(t, win, 3)
 	lastWindow.Input(gi.PointerMove{Pos: icon})
 	click(icon, gi.ButtonPrimary)
 	if in, ok := nextIntent(t).(app.ShowTab); !ok || in.Group != 13 {
@@ -301,63 +328,6 @@ func TestTheServersButtonsFitANarrowPane(t *testing.T) {
 	}
 }
 
-// threeTabs is twoTabs with a third tab, p3's, last.
-func threeTabs() app.State {
-	st := twoTabs()
-	b3 := &app.Box{Pane: "p3"}
-	st.Panes = append(st.Panes, app.Pane{ID: "p3", Title: "Files", Kind: app.KindJobs})
-	st.Groups["p3"] = b3
-	st.Tabs = append(st.Tabs, app.Tab{Group: 3, Pane: "p3", Panes: 1})
-	return st
-}
-
-// A tab opened grows in where it lands, and one closed shrinks away
-// while the tabs after it slide into its place. The window's first
-// tabs are simply there.
-func TestTabsOpenAndCloseInMotion(t *testing.T) {
-	win, _, publish := windowStage(t)
-	publish(twoTabs())
-	settle()
-	b := win.tabs
-	if r, open := b.drawnAt(1); r != b.boxes[1] || open != 1 {
-		t.Fatalf("a first tab is drawn at %v, %v open, not where it is", r, open)
-	}
-	publish(threeTabs())
-	lastWindow.Frame(time.Second / 60)
-	lastWindow.Frame(time.Second / 60)
-	r, open := b.drawnAt(2)
-	if r.Size().W >= b.boxes[2].Size().W || open >= 1 || r.Min.X != b.boxes[2].Min.X {
-		t.Fatalf("an opened tab starts at %v, %v open, want narrower than %v", r, open, b.boxes[2])
-	}
-	settle()
-	if r, open := b.drawnAt(2); r != b.boxes[2] || open != 1 {
-		t.Fatalf("settled, the opened tab is at %v, %v open, want %v", r, open, b.boxes[2])
-	}
-	// The middle tab closes: it shrinks where it was, and the last
-	// slides left into its place.
-	was := b.boxes[2]
-	st := threeTabs()
-	st.Panes = append(st.Panes[:1], st.Panes[2])
-	st.Tabs = append(st.Tabs[:1], st.Tabs[2])
-	delete(st.Groups, "p2")
-	publish(st)
-	lastWindow.Frame(time.Second / 60)
-	lastWindow.Frame(time.Second / 60)
-	if len(b.gone) != 1 || b.gone[0].tab.Group != 2 {
-		t.Fatalf("closing, the bar draws %d gone tabs", len(b.gone))
-	}
-	if r, _ := b.drawnAt(1); r.Min.X <= b.boxes[1].Min.X || r.Min.X >= was.Min.X {
-		t.Fatalf("the last tab is at %v, want between %v and %v", r, was, b.boxes[1])
-	}
-	settle()
-	if len(b.gone) != 0 {
-		t.Fatalf("settled, %d closed tabs are still drawn", len(b.gone))
-	}
-	if r, _ := b.drawnAt(1); r != b.boxes[1] {
-		t.Fatalf("settled, the last tab is at %v, want %v", r, b.boxes[1])
-	}
-}
-
 // twoTermTabs is twoTabs with a terminal in each tab, and the sessions
 // typed into, by pane.
 func twoTermTabs(t *testing.T, sh *screen.Shells) (app.State, map[string]*sessiontest.Typed) {
@@ -390,21 +360,15 @@ func TestASwitchedTabComesIn(t *testing.T) {
 	publish(st)
 	settle()
 	b, s := win.tabs, win.stage
-	if s.cover.Value() != 0 || b.lit.Value() != 1 {
-		t.Fatalf("the window's first tabs move: the stage is %v covered, the front tab %v lit", s.cover.Value(), b.lit.Value())
+	if s.cover.Value() != 0 {
+		t.Fatalf("the window's first tabs move: the stage is %v covered", s.cover.Value())
 	}
 	publish(inFront(st, "p2"))
-	if b.front != 2 || s.from != 1 {
+	if b.front != 2 || b.bar.Front() != "2" || s.from != 1 {
 		t.Fatalf("switched, the tab in front is %d, coming from %v", b.front, s.from)
 	}
 	if c := s.cover.Value(); c <= 0 || c >= 1 || !s.cover.Active() {
 		t.Fatalf("a moment after the switch, the stage is %v covered", c)
-	}
-	if l := b.lit.Value(); l <= 0 || l >= 1 {
-		t.Fatalf("a moment after the switch, the front tab's look is %v of the way", l)
-	}
-	if r := b.litAt(); r.Min.X <= b.boxes[0].Min.X || r.Min.X >= b.boxes[1].Min.X {
-		t.Fatalf("the front tab's fill is at %v, want between %v and %v", r, b.boxes[0], b.boxes[1])
 	}
 	// Typed while it moves, it reaches the tab picked.
 	lastWindow.Input(gi.TextInput{Text: "ls"})
@@ -417,11 +381,8 @@ func TestASwitchedTabComesIn(t *testing.T) {
 		t.Fatalf("typed as the tab came in, p2 was sent %q and p1 %q", got, sessions["p1"].Sent())
 	}
 	settle()
-	if s.cover.Value() != 0 || s.cover.Active() || b.lit.Value() != 1 || b.lit.Active() || s.Step(time.Second/60) {
-		t.Fatalf("settled, the stage is %v covered and the front tab %v lit", s.cover.Value(), b.lit.Value())
-	}
-	if r := b.litAt(); r != b.boxes[1] {
-		t.Fatalf("settled, the front tab's fill is at %v, want %v", r, b.boxes[1])
+	if s.cover.Value() != 0 || s.cover.Active() || s.Step(time.Second/60) || b.bar.Step(time.Second/60) {
+		t.Fatalf("settled, the stage is %v covered, or the bar still moves", s.cover.Value())
 	}
 	// Back to the left, it comes from the left.
 	publish(inFront(st, "p1"))
@@ -440,17 +401,17 @@ func TestATabDraggedOutSwitchesStill(t *testing.T) {
 	lastWindow.Input(gi.PointerDown{Pos: at, Button: gi.ButtonPrimary})
 	lastWindow.Input(gi.PointerMove{Pos: at.Add(geom.Pt(20, 30))})
 	lastWindow.Frame(time.Second / 60)
-	if win.tabs.carried != 1 {
-		t.Fatalf("the tab did not lift off: %d is carried", win.tabs.carried)
+	if win.tabs.bar.Carried() != "1" {
+		t.Fatalf("the tab did not lift off: %q is carried", win.tabs.bar.Carried())
 	}
-	win.tabs.Handle(gi.DragEnd{Out: true, At: geom.Pt(1200, 300)}, lastUI)
+	win.tabs.bar.Handle(gi.DragEnd{Out: true, At: geom.Pt(1200, 300)}, lastUI)
 	// The program moves the tab to a window of its own.
 	st := inFront(twoTabs(), "p2")
 	st.Panes, st.Tabs = st.Panes[1:], st.Tabs[1:]
 	delete(st.Groups, "p1")
 	publish(st)
-	if win.stage.cover.Value() != 0 || win.tabs.lit.Value() != 1 {
-		t.Fatalf("dragged out, the stage is %v covered and the front tab %v lit", win.stage.cover.Value(), win.tabs.lit.Value())
+	if win.stage.cover.Value() != 0 || win.stage.cover.Active() {
+		t.Fatalf("dragged out, the stage is %v covered", win.stage.cover.Value())
 	}
 }
 
@@ -486,26 +447,5 @@ func TestAFileManagerTabComesIn(t *testing.T) {
 	settle()
 	if filemanager.FocusIn(lastUI, app.FilePaneViews("p1")) != listing {
 		t.Fatal("parked after its tab came in, the file manager lost its views")
-	}
-}
-
-// A tab's title that does not fit gives way to its short one, a
-// server's folder without the server, as "Skylake: " was all a server's
-// tab showed. Either way the tab says it cut the title, for the tooltip
-// to show it whole.
-func TestATabTitleThatDoesNotFitKeepsItsFolder(t *testing.T) {
-	const size = 13
-	shape := func(s string) text.Run { return text.Default().Shape(s, size) }
-	full, short := shape("Skylake: build"), shape("build")
-	b := &tabBar{shapedSize: size, titles: []text.Run{full}, names: []string{"Skylake: build"}, shorts: []text.Run{short}}
-	if got, cut := b.fitTitle(0, 500); got.Advance != full.Advance || cut {
-		t.Errorf("with room the tab says %v wide, cut %v, want all of its title", got.Advance, cut)
-	}
-	if got, cut := b.fitTitle(0, full.Advance-2); got.Advance != short.Advance || !cut {
-		t.Errorf("short of room the tab says %v wide, cut %v, want the folder's %v, cut", got.Advance, cut, short.Advance)
-	}
-	b.shorts[0] = shape("")
-	if got, cut := b.fitTitle(0, 30); got.Advance != full.Advance || !cut {
-		t.Errorf("a title with nothing shorter says %v wide, cut %v, want all of it, faded, and cut", got.Advance, cut)
 	}
 }

@@ -7,6 +7,16 @@ and the numbering follows [semantic versioning](https://semver.org/spec/v2.0.0.h
 While the major version is 0 the shape is still moving: a minor bump may
 change how something behaves.
 
+## Unreleased
+
+### Changed
+
+**The tab bar is gunim's shared one,** the same as Hej DAW!'s. It looks
+and works as before: tabs slide, the front tab's fill glides, and cut
+titles show whole in a tooltip. A tab you drag now lifts as a card that
+trails the pointer and says where it would land ("Dock here"). A tab you
+click comes to the front at once.
+
 ## v0.12.1-beta.3
 
 ### Changed

@@ -11,6 +11,7 @@ import (
 	"github.com/marrasen/gunim/filemanager"
 	"github.com/marrasen/gunim/geom"
 	gi "github.com/marrasen/gunim/input"
+	"github.com/marrasen/gunim/widget/dock"
 
 	"github.com/marrasen/kakel/app"
 )
@@ -200,7 +201,7 @@ func TestATabDroppedOnAFileManagerDocks(t *testing.T) {
 		t.Fatal("the file manager pane is not drawn")
 	}
 	at := geom.Pt(r.Max.X-10, r.Center().Y)
-	tab := app.TabDrag{Group: 2, Window: 1}
+	tab := dock.Drag{ID: "2", Win: 1}
 	lastWindow.Input(gi.DragOver{Pos: at, Data: tab})
 	lastWindow.Frame(time.Second / 60)
 	lastWindow.Input(gi.Drop{Pos: at, Data: tab})

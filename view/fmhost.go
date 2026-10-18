@@ -6,6 +6,7 @@ import (
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
+	"github.com/marrasen/gunim/widget/dock"
 
 	"github.com/marrasen/kakel/app"
 )
@@ -57,7 +58,7 @@ func (h *fmHost) Handle(e input.Event, u *gunim.UI) bool {
 		// status bar, go nowhere: not to the terminal beside it. A tab
 		// or a pane goes on to the window, to dock beside this one.
 		switch e.Data.(type) {
-		case app.TabDrag, app.PaneDrag:
+		case dock.Drag, app.PaneDrag:
 			return false
 		}
 		return true

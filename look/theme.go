@@ -15,6 +15,7 @@ import (
 	"github.com/marrasen/gunim/filemanager"
 	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
+	"github.com/marrasen/gunim/widget/dock"
 
 	"github.com/marrasen/kakel/grid"
 	"github.com/marrasen/kakel/settings"
@@ -316,6 +317,8 @@ func Of(t themes.Theme) (Themed, error) {
 	// Code sits where a field's text does.
 	field := mix(bg, frameBG, 50)
 	echo = append(echo, codeOf(pal, field, frameFG)...)
+	// The sidebar's rows, which the tabs in the title bar look like.
+	sideFill, rowActive, rowHover, faint := mix(sideBG, sideFG, 4), alpha(accent, 0x40), alpha(sideFG, 0x14), mix(sideFG, sideBG, 45)
 	th := theme.Make(t.Name, append(echo,
 		theme.Set(widget.Background, bg),
 		theme.Set(widget.Ink, frameFG),
@@ -349,12 +352,24 @@ func Of(t themes.Theme) (Themed, error) {
 		theme.Set(widget.TableStrong, accent),
 		theme.Set(widget.PaletteHint, dim),
 		theme.Set(widget.PaletteMark, alpha(accent, 0x50)),
-		theme.Set(SidebarFill, mix(sideBG, sideFG, 4)),
-		theme.Set(RowActive, alpha(accent, 0x40)),
+		theme.Set(SidebarFill, sideFill),
+		theme.Set(RowActive, rowActive),
 		theme.Set(RowActiveInk, activeInk),
-		theme.Set(RowHover, alpha(sideFG, 0x14)),
-		theme.Set(Faint, mix(sideFG, sideBG, 45)),
+		theme.Set(RowHover, rowHover),
+		theme.Set(Faint, faint),
 		theme.Set(TermBackground, bg),
+		// The tab bar in the title bar: its tabs as the sidebar's rows,
+		// and a tab dragged on the sidebar's fill.
+		theme.Set(dock.BarFill, sideFill),
+		theme.Set(dock.TabFront, rowActive),
+		theme.Set(dock.TabHover, rowHover),
+		theme.Set(dock.TabInk, frameFG),
+		theme.Set(dock.TabFaint, faint),
+		theme.Set(dock.DropRing, accent),
+		theme.Set(dock.DropFill, alpha(accent, 0x33)),
+		// kakel.small's default and a point, as the bar always had.
+		theme.Set(dock.TabText, 13),
+		theme.Set(dock.TabGap, 2),
 	)...)
 	// On stage, the terminal's own colours, and an accent that reads on
 	// its ground.

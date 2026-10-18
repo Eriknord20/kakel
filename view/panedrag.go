@@ -344,6 +344,11 @@ func (g *paneGhost) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, _ guni
 func (g *paneGhost) Handle(e input.Event, u *gunim.UI) bool {
 	if a, ok := e.(input.DragAnswer); ok {
 		to, thin := float32(0), float32(0)
+		switch a.Answer.(type) {
+		case widget.DropHint:
+			// The tab bar's answer: the pane goes onto a tab of its own.
+			to = 1
+		}
 		switch a.Answer {
 		case movesHere:
 			to = 1
