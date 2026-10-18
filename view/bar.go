@@ -257,3 +257,59 @@ func (b *captionBar) dragEnded(e input.DragEnd, u *gunim.UI) {
 	// image's was.
 	u.Send(b.w, app.PaneToNewWindow{Pane: b.id, At: e.At.Sub(b.grab), Size: b.w.size})
 }
+
+// The measures of a pane's line dragged out of its caption, drawn as a
+// tab: the room each side of its title, its icon, and how far below the
+// top of the title bar a tab starts.
+const (
+	tabPad  = 10
+	tabIcon = 16
+	tabTop  = 4
+)
+
+// tabGhost is the image of a pane's line dragged out of its caption, as
+// a tab, ringed while it is over something that takes it.
+type tabGhost struct {
+	anim.Group
+	title text.Run
+	kind  string
+	size  geom.Size
+	lit   *anim.Float
+}
+
+// Layout implements [gunim.Node].
+func (g *tabGhost) Layout(gunim.Constraints, gunim.Frame, gunim.Children) geom.Size { return g.size }
+
+// Paint implements [gunim.Node].
+func (g *tabGhost) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, _ gunim.Children) {
+	th := f.Theme
+	r := geom.Rect{Max: box.Point()}
+	p.RRect(r, 6, paint.Solid(look.SidebarFill.Get(th)))
+	p.RRect(r, 6, paint.Solid(look.RowActive.Get(th)))
+	if on := min(max(g.lit.Value(), 0), 1); on > 0.01 {
+		c := switcherRing.Get(th)
+		c.A = uint8(float32(c.A) * on)
+		p.RRectStroke(r.Inset(geom.Uniform(1)), 6, paint.Fill{}, paint.Stroke{Width: 2, Color: c})
+	}
+	ink := widget.Ink.Get(th)
+	mid := box.H / 2
+	paintIcon(p, g.kind, geom.Rc(tabPad, mid-tabIcon/2, tabIcon, tabIcon), ink)
+	x := float32(tabPad + tabIcon + 6)
+	defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(x, 0, box.W-x-tabPad, box.H), Opacity: 1, Clip: true})()
+	g.title.Paint(p, geom.Pt(x, mid-g.title.Height()/2), ink)
+}
+
+// Handle implements [gunim.Handler]: the node under the pointer says
+// whether it takes the tab.
+func (g *tabGhost) Handle(e input.Event, u *gunim.UI) bool {
+	if a, ok := e.(input.DragAnswer); ok {
+		to := float32(0)
+		if a.Answer != nil {
+			to = 1
+		}
+		g.lit.Animate(to, widget.Quick.Get(u.Theme()))
+		u.Invalidate()
+		return true
+	}
+	return false
+}

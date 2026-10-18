@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/marrasen/kakel/app"
-	"github.com/marrasen/kakel/look"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
@@ -15,7 +14,6 @@ import (
 	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
-	"github.com/marrasen/gunim/text"
 	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
 	"github.com/marrasen/gunim/widget/dock"
@@ -53,18 +51,6 @@ type tabBar struct {
 	fade, titleFade *anim.Float
 }
 
-// The tabs' measures, for a tab dragged out of a pane's caption: the
-// room each side of a title, its icon, and how far below the top of
-// the bar a tab starts.
-const (
-	tabPad  = 10
-	tabIcon = 16
-	tabTop  = 4
-	// springHold is how long a drag is held over a tab before the tab
-	// comes to the front, as gunim's bar has it.
-	springHold = 500 * time.Millisecond
-)
-
 // rowFadeOut and rowFadeIn are how the tabs and the window's title fade
 // as the title row changes between them: the one going quickly, the
 // other coming a little slower.
@@ -74,7 +60,8 @@ var (
 )
 
 func newTabBar(w *Window) *tabBar {
-	b := &tabBar{w: w, bar: dock.NewBar("", w.winID), fade: anim.NewFloat(1), titleFade: anim.NewFloat(1)}
+	// The bar learns its window's number, and its size, from the state.
+	b := &tabBar{w: w, bar: dock.NewBar("", 0), fade: anim.NewFloat(1), titleFade: anim.NewFloat(1)}
 	b.Add(b.fade, b.titleFade)
 	b.bar.Plus, b.bar.Plain, b.bar.Caption = true, true, true
 	b.bar.OnChange = b.change
@@ -132,7 +119,7 @@ func (b *tabBar) change(c dock.Change, u *gunim.UI) gunim.Intent {
 	case dock.Detach:
 		// The tab's top left corner where the image's was, and the
 		// window as large as this one.
-		in = app.TabToNewWindow{Group: groupOf(c.ID), At: c.At, Size: b.w.size}
+		in = app.TabToNewWindow{Group: groupOf(c.ID), At: c.At, Size: c.Size}
 	}
 	if in != nil {
 		u.Send(b.w, in)
@@ -161,7 +148,7 @@ func (b *tabBar) show(tabs []app.Tab, focus string, u *gunim.UI) (from float32, 
 	}
 	from, switched = b.switchOf(tabs, front)
 	b.tabs, b.front = tabs, front
-	b.bar.Win = b.w.winID
+	b.bar.Win, b.bar.DetachSize = b.w.winID, b.w.size
 	ts := make([]dock.Tab, len(tabs))
 	for i, t := range tabs {
 		more := ""
@@ -275,7 +262,6 @@ func (b *tabBar) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children)
 	if !b.shown() {
 		return c.Constrain(geom.Sz(0, h))
 	}
-	b.bar.DetachSize = b.w.size
 	k := kids.At(0)
 	k.Layout(gunim.Tight(geom.Sz(c.Max.W, h)))
 	k.Place(geom.Point{})
@@ -291,53 +277,6 @@ func (b *tabBar) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids guni
 		defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: fade})()
 	}
 	kids.At(0).Paint(p)
-}
-
-// tabGhost is the image of a tab that follows the pointer while it is
-// dragged, ringed while it is over something that takes it.
-type tabGhost struct {
-	anim.Group
-	title text.Run
-	kind  string
-	size  geom.Size
-	lit   *anim.Float
-}
-
-// Layout implements [gunim.Node].
-func (g *tabGhost) Layout(gunim.Constraints, gunim.Frame, gunim.Children) geom.Size { return g.size }
-
-// Paint implements [gunim.Node].
-func (g *tabGhost) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, _ gunim.Children) {
-	th := f.Theme
-	r := geom.Rect{Max: box.Point()}
-	p.RRect(r, 6, paint.Solid(look.SidebarFill.Get(th)))
-	p.RRect(r, 6, paint.Solid(look.RowActive.Get(th)))
-	if on := min(max(g.lit.Value(), 0), 1); on > 0.01 {
-		c := switcherRing.Get(th)
-		c.A = uint8(float32(c.A) * on)
-		p.RRectStroke(r.Inset(geom.Uniform(1)), 6, paint.Fill{}, paint.Stroke{Width: 2, Color: c})
-	}
-	ink := widget.Ink.Get(th)
-	mid := box.H / 2
-	paintIcon(p, g.kind, geom.Rc(tabPad, mid-tabIcon/2, tabIcon, tabIcon), ink)
-	x := float32(tabPad + tabIcon + 6)
-	defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(x, 0, box.W-x-tabPad, box.H), Opacity: 1, Clip: true})()
-	g.title.Paint(p, geom.Pt(x, mid-g.title.Height()/2), ink)
-}
-
-// Handle implements [gunim.Handler]: the node under the pointer says
-// whether it takes the tab.
-func (g *tabGhost) Handle(e input.Event, u *gunim.UI) bool {
-	if a, ok := e.(input.DragAnswer); ok {
-		to := float32(0)
-		if a.Answer != nil {
-			to = 1
-		}
-		g.lit.Animate(to, widget.Quick.Get(u.Theme()))
-		u.Invalidate()
-		return true
-	}
-	return false
 }
 
 // showTabs shows the window's tabs, and gives the bar the title bar's
@@ -474,12 +413,13 @@ func (w *Window) tabDrop(e input.Event, u *gunim.UI) bool {
 			return false
 		}
 		w.dock = w.dockAt(e.Pos, d, u)
+		// A tab's drag card says what a drop would do.
 		switch {
 		case w.dock.pane != "":
-			u.AnswerDrag(docksHere)
+			u.AnswerDrag(widget.DropHint{Text: dock.SplitHere.Get(u.Theme()), Effect: widget.DropMove})
 			w.dropLit.Animate(0, widget.Quick.Get(u.Theme()))
 		case d.Win != w.winID:
-			u.AnswerDrag(movesHere)
+			u.AnswerDrag(widget.DropHint{Text: dock.DockHere.Get(u.Theme()), Effect: widget.DropMove})
 			w.dropLit.Animate(1, widget.Quick.Get(u.Theme()))
 		default:
 			u.Invalidate()

@@ -220,3 +220,7 @@ func TestADragHeldOverATabOpensIt(t *testing.T) {
 		t.Fatalf("given up where nothing took it, the bar sent %#v", in)
 	}
 }
+
+// springHold is how long a drag is held over a tab before the tab comes
+// to the front, as gunim's tab bar has it.
+const springHold = 500 * time.Millisecond
