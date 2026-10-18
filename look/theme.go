@@ -15,6 +15,7 @@ import (
 	"github.com/marrasen/gunim/filemanager"
 	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
+	"github.com/marrasen/gunim/widget/dock"
 
 	"github.com/marrasen/kakel/grid"
 	"github.com/marrasen/kakel/settings"
@@ -355,6 +356,16 @@ func Of(t themes.Theme) (Themed, error) {
 		theme.Set(RowHover, alpha(sideFG, 0x14)),
 		theme.Set(Faint, mix(sideFG, sideBG, 45)),
 		theme.Set(TermBackground, bg),
+		// The tab bar in the title bar: its tabs as the sidebar's rows.
+		theme.Set(dock.TabFront, alpha(accent, 0x40)),
+		theme.Set(dock.TabHover, alpha(sideFG, 0x14)),
+		theme.Set(dock.TabInk, frameFG),
+		theme.Set(dock.TabFaint, mix(sideFG, sideBG, 45)),
+		theme.Set(dock.TabMark, accent),
+		theme.Set(dock.DropRing, accent),
+		theme.Set(dock.DropFill, alpha(accent, 0x33)),
+		theme.Set(dock.TabText, 13),
+		theme.Set(dock.TabGap, 2),
 	)...)
 	// On stage, the terminal's own colours, and an accent that reads on
 	// its ground.

@@ -170,10 +170,11 @@ func TestADragHeldOverATabOpensIt(t *testing.T) {
 	publish(splitTabs())
 	drain()
 	// In the bar's own space, as the drag reaches it.
-	second := win.tabs.boxes[1].Center()
+	sr, _ := win.tabs.bar.TabRect("2")
+	second := sr.Center()
 	over := func(at geom.Point, data any) {
-		if !win.tabs.Handle(gi.DragOver{Pos: at, Data: data}, lastUI) {
-			win.tabs.Handle(gi.DragLeave{}, lastUI)
+		if !win.tabs.bar.Handle(gi.DragOver{Pos: at, Data: data}, lastUI) {
+			win.tabs.bar.Handle(gi.DragLeave{}, lastUI)
 		}
 		lastWindow.Frame(time.Second / 60)
 	}
@@ -195,19 +196,27 @@ func TestADragHeldOverATabOpensIt(t *testing.T) {
 	if in := nextIntent(t); in != (app.ShowTab{Group: 2}) {
 		t.Fatalf("a drag held over the second tab sent %#v", in)
 	}
-	win.tabs.Handle(gi.DragLeave{}, lastUI)
+	win.tabs.bar.Handle(gi.DragLeave{}, lastUI)
 
-	// A tab carried there and let go where nothing takes it: the first
-	// tab, in front before, comes back.
-	win.tabs.carried = 1
-	over(second, app.TabDrag{Group: 1, Window: 1})
+	// A tab carried there and given up: the first tab, in front before,
+	// comes back.
+	publish(splitTabs())
+	drain()
+	from := tabAt(t, win, 0)
+	lastWindow.Input(gi.PointerMove{Pos: from})
+	lastWindow.Input(gi.PointerDown{Pos: from, Button: gi.ButtonPrimary})
+	lastWindow.Input(gi.PointerMove{Pos: from.Add(geom.Pt(0, 12))})
+	lastWindow.Frame(time.Second / 60)
+	lastWindow.Input(gi.PointerMove{Pos: tabAt(t, win, 1)})
+	lastWindow.Frame(time.Second / 60)
 	lastWindow.Frame(springHold)
 	lastWindow.Frame(time.Second / 60)
 	if in := nextIntent(t); in != (app.ShowTab{Group: 2}) {
 		t.Fatalf("a tab held over the second tab sent %#v", in)
 	}
-	win.tabs.dragEnded(gi.DragEnd{}, lastUI)
+	lastWindow.Input(gi.KeyPress{Key: gi.KeyEscape})
+	lastWindow.Frame(time.Second / 60)
 	if in := nextIntent(t); in != (app.ShowTab{Group: 1}) {
-		t.Fatalf("let go where nothing took it, the bar sent %#v", in)
+		t.Fatalf("given up where nothing took it, the bar sent %#v", in)
 	}
 }

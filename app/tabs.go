@@ -25,13 +25,6 @@ type Tab struct {
 	Panes int
 }
 
-// TabDrag is what a tab dragged out of its window's tab bar carries:
-// the tab, and the window it is dragged from.
-type TabDrag struct {
-	Group  int
-	Window int
-}
-
 // Intents for tabs.
 type (
 	// ShowTab puts a tab in front, with the keyboard on the pane in it
