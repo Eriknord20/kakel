@@ -312,12 +312,17 @@ type Window struct {
 	themeNow string
 	// ask is the dialog asking a connection's question askID, and
 	// saved are the saved servers; serverIDs and paletteIDs are the
-	// commands of the Machines menu's items and the palette's.
-	ask        *widget.Dialog
-	askID      uint64
-	saved      []remote.Host
-	serverIDs  []string
-	paletteIDs []string
+	// commands of the Machines menu's items and the palette's, and
+	// paletteChips those of the chips of the palette's machines.
+	// paletteLast is the command of the chip last picked on each
+	// machine, which the palette lights on it next.
+	ask          *widget.Dialog
+	askID        uint64
+	saved        []remote.Host
+	serverIDs    []string
+	paletteIDs   []string
+	paletteChips [][]string
+	paletteLast  map[machines.ID]string
 	// secretCopies counts secrets copied, so only the last one copied
 	// clears the clipboard when its time is up.
 	secretCopies uint64
@@ -414,6 +419,16 @@ func NewWindow(sh *screen.Shells, keys *ui.Keymap, all []look.Themed) *Window {
 		}
 		return nil
 	}}
+	// A machine's chip picked is the one lit on it next.
+	w.palette.OnChip = func(i, chip int, u *gunim.UI) gunim.Intent {
+		if i < len(w.paletteChips) && chip < len(w.paletteChips[i]) {
+			w.paletteLast[machines.ID(strings.TrimPrefix(w.paletteIDs[i], "machine:"))] = w.paletteChips[i][chip]
+			w.palette.Items[i].Chip = chip
+			w.run(w.paletteChips[i][chip], u)
+		}
+		return nil
+	}
+	w.paletteLast = map[machines.ID]string{}
 	// Its shortcut again closes it: the keys typed in the palette reach
 	// the palette alone, which hands on the ones it does not use.
 	w.palette.Key = func(k input.KeyPress, u *gunim.UI) bool {
@@ -1261,46 +1276,84 @@ func (w *Window) servers(saved []remote.Host) {
 			Hint: hint(c.id), Also: commandAlso[c.id]})
 		w.paletteIDs = append(w.paletteIDs, c.id)
 	}
-	for _, h := range saved {
-		for _, c := range []struct {
-			title, id string
-			icon      *icon.Icon
-		}{
-			{"Connect to " + h.Name, "server.open.", icon.Plug},
-			{"Edit Server " + h.Name, "server.edit.", icon.Pencil},
-			{"Remove Server " + h.Name, "server.remove.", icon.Trash2},
-		} {
-			id := c.id + remote.CommandName(h.Name)
-			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: c.title, Icon: c.icon, Also: []string{h.Address}, Hint: hint(id)})
-			w.paletteIDs = append(w.paletteIDs, id)
+	// Every machine by name, the saved servers not connected to as
+	// well, as the launcher has them: one line each, with what opens on
+	// it as chips, a terminal, or this computer's shells by name, its
+	// files, this computer's settings, its log, and for a server saved,
+	// connecting to it, editing it and removing it. Then each folder
+	// saved for it.
+	w.paletteChips = make([][]string, len(w.palette.Items))
+	machineLine := func(m machines.ID) {
+		where, ic := w.nameOf(m), icon.Server
+		var note string
+		var also []string
+		if m == "" {
+			where, ic = "This computer", icon.Laptop
 		}
+		if slices.Contains(w.machines(), m) && m != "" {
+			note = "connected"
+		}
+		cmd := w.cmdName(m)
+		var titles, ids []string
+		chip := func(title, id string) { titles, ids = append(titles, title), append(ids, id) }
+		if m == "" && len(w.shellChoices) > 0 {
+			// The shell a new terminal starts first.
+			shellIDs := w.shellIDs()
+			for _, first := range []bool{true, false} {
+				for i, sh := range w.shellChoices {
+					if (sh.ID == w.defaultShell) == first {
+						chip(sh.Title, shellIDs[i])
+					}
+				}
+			}
+		} else {
+			chip("Terminal", "conn.terminal."+cmd)
+		}
+		chip("Files", "conn.files."+cmd)
+		if m == "" {
+			chip("Settings", "app.thisComputer")
+			also = append(also, commandAlso["app.thisComputer"]...)
+		}
+		if slices.Contains(w.accounts, m) {
+			chip("Connection Log", "conn.log."+cmd)
+		}
+		keys := ""
+		if i := slices.IndexFunc(saved, func(h remote.Host) bool { return machines.ID(h.ID) == m }); i >= 0 {
+			h := saved[i]
+			name := remote.CommandName(h.Name)
+			where = h.Name
+			if note == "" {
+				chip("Connect", "server.open."+name)
+			}
+			chip("Edit", "server.edit."+name)
+			chip("Remove", "server.remove."+name)
+			keys = hint("server.open." + name)
+			also = append(also, h.Address)
+			if h.Window {
+				ic, note = icon.AppWindow, strings.TrimSuffix("kakel window · "+note, " · ")
+			}
+		}
+		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: where, Detail: note, Icon: ic, Hint: keys,
+			Also: append(also, "machine", "server", "connect"), Chips: titles, Chip: max(slices.Index(ids, w.paletteLast[m]), 0)})
+		w.paletteIDs = append(w.paletteIDs, "machine:"+string(m))
+		w.paletteChips = append(w.paletteChips, ids)
 	}
+	for _, m := range w.paletteMachines() {
+		machineLine(m)
+	}
+	// A connection's log, of an account no machine above has.
 	for _, m := range w.accounts {
+		if slices.Contains(w.paletteMachines(), m) {
+			continue
+		}
 		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Connection Log of " + w.nameOf(m), Icon: icon.ScrollText,
 			Also: []string{"log", "account"}})
 		w.paletteIDs = append(w.paletteIDs, "conn.log."+w.cmdName(m))
 	}
-	// Every machine by name, as the launcher words them, the saved
-	// servers not connected to as well: a terminal there, its files, and
-	// each folder saved for it. This computer's terminals are its shells,
-	// by name, below.
 	for _, m := range w.paletteMachines() {
 		where := w.nameOf(m)
 		if m == "" {
 			where = "This computer"
-		}
-		// The machine in front has its terminal and its files at the
-		// top already, as the new ones.
-		here := m == w.hereMachine
-		if (m != "" || len(w.shellChoices) == 0) && !here {
-			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Terminal on " + where, Icon: icon.SquareTerminal,
-				Also: []string{"new terminal", "shell", "ssh"}})
-			w.paletteIDs = append(w.paletteIDs, "conn.terminal."+w.cmdName(m))
-		}
-		if !here {
-			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: "Files on " + where, Icon: icon.Folder,
-				Also: []string{"new file manager", "file manager", "folder", "browse", "explorer"}})
-			w.paletteIDs = append(w.paletteIDs, "conn.files."+w.cmdName(m))
 		}
 		for i, f := range w.foldersOn(m) {
 			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: f.Label(), Detail: where, Icon: icon.Folder,
@@ -2783,6 +2836,8 @@ var notInPalette = map[string]bool{
 	"secrets.open": true, "secrets.window": true, "secrets.add": true, "secrets.addNote": true,
 	"secrets.change": true, "secrets.forget": true, "secrets.export": true, "secrets.import": true,
 	"secrets.addKey": true, "secrets.addPassphrase": true, "secrets.removeKey": true,
+	// A chip on This computer's line.
+	"app.thisComputer": true,
 }
 
 // blankPane stands in for a pane that has nothing to show yet, or any

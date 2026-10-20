@@ -103,42 +103,79 @@ func TestNextPaneGoesInTheSidebarsOrder(t *testing.T) {
 	}
 }
 
-// The palette words what it opens as the launcher does, and finds it by
-// the same words: "files on skylake" finds the files of a server saved
-// and not connected to, and each shell here goes by its name, the one a
-// new terminal starts said to be the default.
-func TestThePaletteWordsWhatItOpensAsTheLauncherDoes(t *testing.T) {
+// The palette has each machine on a line of its own, found by its name,
+// with what opens on it as chips, as the launcher has them: a terminal,
+// its files, its log, and for a server saved, editing and removing it.
+// This computer's terminals are its shells by name, the default first.
+// No line of its own says "Terminal on" a machine, "Files on" one that
+// is not in front, or connects to, edits or removes a server. Each shell
+// here goes by its name too, the default said to be.
+func TestThePaletteHasAMachineALineWithChips(t *testing.T) {
 	win, _, publish := windowStage(t)
-	publish(app.State{Saved: []remote.Host{{ID: "sky", Name: "skylake", Address: "10.0.0.5"}},
-		Machines:     []machines.Info{{ID: "sky", Name: "skylake"}},
+	publish(app.State{Saved: []remote.Host{{ID: "sky", Name: "skylake", Address: "10.0.0.5"}, {ID: "bk", Name: "backup"}},
+		Machines: []machines.Info{{ID: "sky", Name: "skylake"}}, Connected: []machines.ID{"sky"}, Accounts: []machines.ID{"sky"},
 		Shells:       []app.ShellChoice{{ID: "cmd", Title: "Command Prompt"}, {ID: "pwsh", Title: "PowerShell 7"}},
 		DefaultShell: "pwsh"})
 	items := make([]match.Item, len(win.palette.Items))
 	for i, it := range win.palette.Items {
 		items[i] = match.Item{Title: it.Title, Also: it.Also}
 	}
-	best := func(q string) widget.PaletteItem {
+	best := func(q string) int {
 		t.Helper()
 		found := match.Rank(items, q)
 		if len(found) == 0 {
 			t.Fatalf("%q finds nothing", q)
 		}
-		return win.palette.Items[found[0].Index]
+		return found[0].Index
 	}
-	if it := best("files on skylake"); it.Title != "Files on skylake" {
-		t.Fatalf("files on skylake finds %q first", it.Title)
+	sky := best("skylake")
+	if it := win.palette.Items[sky]; it.Title != "skylake" || !slices.Equal(it.Chips, []string{"Terminal", "Files", "Connection Log", "Edit", "Remove"}) || it.Detail != "connected" {
+		t.Fatalf("skylake finds %q with chips %q", it.Title, it.Chips)
 	}
-	if it := best("terminal on skylake"); it.Title != "Terminal on skylake" {
-		t.Fatalf("terminal on skylake finds %q first", it.Title)
+	if it := win.palette.Items[best("10.0.0.5")]; it.Title != "skylake" {
+		t.Fatalf("skylake's address finds %q", it.Title)
 	}
-	if it := best("new file manager"); it.Title != "New File Manager" && !strings.HasPrefix(it.Title, "Files on") {
-		t.Fatalf("new file manager finds %q first", it.Title)
+	if it := win.palette.Items[best("backup")]; !slices.Equal(it.Chips, []string{"Terminal", "Files", "Connect", "Edit", "Remove"}) {
+		t.Fatalf("backup, not connected to, has chips %q", it.Chips)
+	}
+	here := slices.IndexFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "This computer" })
+	if it := win.palette.Items[max(here, 0)]; here < 0 || !slices.Equal(it.Chips, []string{"PowerShell 7", "Command Prompt", "Files", "Settings"}) {
+		t.Fatalf("this computer has chips %q", it.Chips)
 	}
 	for _, it := range win.palette.Items {
-		if strings.HasPrefix(it.Title, "Terminal on This computer") || strings.HasPrefix(it.Title, "New Terminal on") {
-			t.Fatalf("the palette still offers %q", it.Title)
+		for _, gone := range []string{"Terminal on ", "Files on skylake", "Connect to skylake", "Edit Server ", "Remove Server ", "New Terminal on", "This Computer"} {
+			if strings.HasPrefix(it.Title, gone) {
+				t.Fatalf("the palette still offers %q", it.Title)
+			}
 		}
 	}
+	// A chip picked opens it, and is the one lit on the machine next.
+	for len(lastWindow.Client().Intents()) > 0 {
+		<-lastWindow.Client().Intents()
+	}
+	win.palette.OnChip(sky, 1, lastUI)
+	var got app.OpenFilesOn
+	for got.Machine == "" {
+		if in, ok := nextIntent(t).(app.OpenFilesOn); ok {
+			got = in
+		}
+	}
+	if got.Machine != "sky" {
+		t.Fatalf("skylake's Files opened files on %q", got.Machine)
+	}
+	publish(app.State{Saved: []remote.Host{{ID: "sky", Name: "skylake"}}, Machines: []machines.Info{{ID: "sky", Name: "skylake"}}})
+	i := slices.IndexFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "skylake" })
+	if i < 0 || win.palette.Items[i].Chip != 1 {
+		t.Fatalf("skylake lights chip %d after Files was picked, want 1", win.palette.Items[max(i, 0)].Chip)
+	}
+}
+
+// Each shell here goes by its name, the one a new terminal starts said
+// to be the default.
+func TestThePaletteNamesTheShellsHere(t *testing.T) {
+	win, _, publish := windowStage(t)
+	publish(app.State{Shells: []app.ShellChoice{{ID: "cmd", Title: "Command Prompt"}, {ID: "pwsh", Title: "PowerShell 7"}},
+		DefaultShell: "pwsh"})
 	i := slices.IndexFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "PowerShell 7" })
 	if i < 0 || win.palette.Items[i].Detail != "This computer · default" {
 		t.Fatalf("the default shell is offered as %+v", win.palette.Items[max(i, 0)])
