@@ -9,13 +9,144 @@ change how something behaves.
 
 ## Unreleased
 
+## v0.12.1
+
+Everything from the three betas, v0.12.1-beta.1 to v0.12.1-beta.3, for
+those coming from v0.12.0, plus the changes made since. Each beta's own
+notes are in CHANGELOG.md.
+
+### Added
+
+**Disk usage, to see what takes the room in a folder.** Pick View ›
+Disk usage in the file manager, or Disk usage on a folder's menu. It
+reads everything under the folder, on this computer or on any machine
+the file manager reaches, and shows it three ways: boxes sized by what
+each item holds, a tree of the folders with their sizes, and the types
+of file. Double-click a box to go into its folder, and Backspace to come
+back out. Files that OneDrive or another cloud provider keeps are
+counted apart: what is only online, what is on this device and could be
+freed, and what is always kept here. The boxes can be sized by what is
+on this device or by what is online, and coloured by cloud, to find the
+folders that hold the most offline files. Delete moves an item to the
+trash, Shift+Delete deletes it for good after asking, and Show in Files
+opens a new tab on the item with it selected.
+
+**The file manager's filter can look in the folders under this one.**
+Click the button beside the filter field, or pick Go › Filter
+subfolders too. What you type then finds matching items anywhere under
+the folder, and a Folder column says where each one sits. Right-click
+an item and pick Go to its folder to open the folder it is in, with
+the item selected. The search stops at 200,000 items or 30 seconds, and
+the status bar says when it did.
+
+**A relay, for windows that cannot reach each other.** `kakel -relay`
+runs on a server with no screen and joins a served window and a window
+connecting to it, over WebSockets on HTTPS. It gets a certificate from
+Let's Encrypt with `-domain`, or runs on plain HTTP behind nginx or
+Caddy. Its URL holds a secret, and it answers nothing without it. The
+Serve dialog can serve through a relay, Connect to Window takes a
+relay's URL and a code or the copied link, and a saved kakel window can
+be one served through a relay. Kakel reaches a relay again by itself
+when the network comes back, and through the proxy `HTTPS_PROXY` names
+or, on Windows, the system's proxy; Settings › Sharing › Relays ›
+Proxy overrides both. Serving, connecting and saved windows can all go
+through a saved server, as servers behind a jump host do, and a saved
+server's Through can be a saved kakel window.
+
+**Tunnels with plain ssh.** A served window takes `ssh -N -L`, `-J`
+and `-W` with the keys it allows. The user name says where the tunnel
+goes out from: `kakel@` for the served machine, or a machine saved
+there by name. With Settings › Sharing › Tunnels may connect on, a
+saved server is connected to on the way when that needs nothing asked.
+`kakel -relay-pipe` is the ProxyCommand that takes ssh through a relay.
+"Tunnels with ssh…" explains it, with the commands for this window to
+copy.
+
+**Walk into zips in the file manager again.** A zip opens as a folder,
+read in place rather than loaded into memory, so a large one on a
+server opens as fast as a small one. A zip with a password asks for it.
+Copy items out of a zip as out of any folder, to this machine or
+another.
+
 ### Changed
 
 **The tab bar is gunim's shared one,** the same as Hej DAW!'s. It looks
 and works as before: tabs slide, the front tab's fill glides, and cut
 titles show whole in a tooltip. A tab you drag now lifts as a card that
-trails the pointer and says where it would land ("Dock here"). A tab you
-click comes to the front at once.
+trails the pointer and says where it would land ("Dock here"), and a tab
+you click comes to the front at once. The bar shows with one tab too, so
+you can drag a lone pane by its tab onto another window; the window it
+left closes.
+
+**Copies show as cards in the corner of Files.** The progress panel
+across the bottom is gone. Each copy, move or delete running has a card
+over the bottom right corner, 360 px wide however wide the window. It
+leads with how many files are done and the time left, names the source
+and destination folders on their own line, and draws a graph of the
+speed across how far the copy has got. While many items copy it shows
+bytes and items a second; once done it shows both as averages, which
+leave out time spent paused or waiting. Pause holds a copy and Resume
+carries it on, and the card says when it waits on a Replace question.
+The chevron folds a card to one line with a progress ring; a third copy
+starting folds the oldest. The progress moves evenly, and the graph and
+the words show the same speed. A finished copy shows Undo and a close
+button instead of a toast, and a copy that took 15 seconds or more stays
+until you close it.
+
+**The palette (Ctrl+Shift+K) gives each machine one line with chips,**
+as the launcher does. A machine is found by its name or address, and
+what opens on it shows as chips: Terminal (or this computer's shells by
+name), Files, Connection Log, and for a saved server Connect, Edit and
+Remove. This computer also gets a Settings chip. Tab, Shift+Tab, Right
+and Left move along the chips, and the chip last picked on a machine is
+lit there next.
+
+**The cursor's glide is a slider, and every animation has a speed.** In
+the theme editor, Cursor sets how long the cursor takes to glide, from
+Jumps up to a second. Motion › Animations sets how long all animations
+take, from off to five times as long. Save applies them to every window.
+
+**Error notices stay until you close them,** and their text can be
+selected and copied.
+
+**A finished job in a window behind others rings and sounds at once.**
+Its rings and sound used to wait until the window came back into sight.
+
+**A failed clipboard copy says so.** When the clipboard refuses a copy,
+kakel shows a failed notice with why, which the Window Log keeps too.
+A program copying bytes that are not text with OSC 52 (such as a
+keystore sent through base64 once, which Windows refuses because it
+holds a NUL) is turned away, instead of saying "Copied" and pasting
+nothing; the notice says how to copy a file's base64 instead.
+
+### Fixed
+
+**The pin button is drawn properly on screens with a colour profile.**
+On such screens, the pin before the minimize button showed as diagonal
+streaks, and other icons and text could be sheared the same way.
+
+**No dark strip beside the menu button.** Once a second tab opened, the
+title bar showed a dark gap between the ☰ button and the first tab.
+
+**A terminal tab through a window keeps its machine in the title** when
+the tab is short of room, as "Windows PowerShell on XPS25" did not.
+
+**A folder opened from the desktop opens on the screen.** Its window
+opened beside the kakel window in front, past the edge of the screen
+when that window was near the edge or minimized.
+
+**A popup no longer hangs past the side of its window** when it fits in
+the window's width: it slides sideways to stay inside.
+
+**Disk usage scrolls the tree to the right row.** A box clicked deep
+down often scrolled the tree to the wrong place; its row now goes to
+the middle of the tree. A click on a row in the tree no longer scrolls
+it.
+
+**A pane opened through another kakel window keeps its tie to it.**
+When the other window named the pane before it arrived here, the name
+was lost, and starting the pane again opened a second shell on the
+server instead of restarting the one that ended.
 
 ## v0.12.1-beta.3
 
