@@ -9,6 +9,24 @@ change how something behaves.
 
 ## Unreleased
 
+## v0.12.2-beta.1
+
+### Changed
+
+**The palette starts with your machines, the one used last first.**
+Ctrl+Shift+K now lists each machine before the commands. The machine
+you last had a pane in front on comes first, then the ones before it,
+then the rest. kakel keeps this order while it runs, and starts afresh
+when it starts again.
+
+### Removed
+
+**New Terminal and Files lines in the palette.** The palette began with
+"New PowerShell" (or the shell in front) and "Files on This computer".
+Each machine's line has these as chips, so the separate lines are gone.
+Typing "terminal" or "files" finds the machine lines. The File menu and
+Ctrl+Shift+T still open a new terminal like the one in front.
+
 ## v0.12.1
 
 Everything from the three betas, v0.12.1-beta.1 to v0.12.1-beta.3, for
