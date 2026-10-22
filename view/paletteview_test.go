@@ -35,47 +35,39 @@ func TestThePaletteFindsCommandsByOtherWords(t *testing.T) {
 	find("Open the Menus")
 }
 
-// The palette starts with what opens in this window, called for what it
-// opens from the pane in front: the shell a new terminal runs, or the
-// server it goes to, and where Files opens. A file manager in a window
-// of its own comes later, and the menus call them the same.
-func TestThePaletteStartsWithANewTerminalAndFiles(t *testing.T) {
+// The palette has no lines of its own for a new terminal or files where
+// the pane in front is: they are chips on that machine's line, found by
+// those words. The File menu still has them, called for what they open
+// from the pane in front, and a file manager in a window of its own.
+func TestThePaletteLeavesNewTerminalAndFilesToTheMachineLines(t *testing.T) {
 	win, _, publish := windowStage(t)
-	first := func() []string {
-		var titles []string
-		for _, it := range win.palette.Items[:2] {
-			titles = append(titles, it.Title)
+	noneOf := func(when string) {
+		t.Helper()
+		for _, it := range win.palette.Items {
+			if slices.Contains([]string{"New Terminal", "New Command Prompt", "New Terminal on skylake", "New File Manager"}, it.Title) || strings.HasPrefix(it.Title, "Files on ") {
+				t.Fatalf("%s, the palette still has %q", when, it.Title)
+			}
 		}
-		return titles
 	}
-	if want := []string{"New Terminal", "Files on This computer"}; !slices.Equal(first(), want) {
-		t.Fatalf("with no shell known, the palette starts with %q, want %q", first(), want)
-	}
+	noneOf("with no shell known")
 	shells := []app.ShellChoice{{ID: "cmd", Title: "Command Prompt"}, {ID: "pwsh", Title: "PowerShell 7"}}
 	publish(app.State{Shells: shells, DefaultShell: "pwsh", HereShell: "Command Prompt"})
-	if want := []string{"New Command Prompt", "Files on This computer"}; !slices.Equal(first(), want) {
-		t.Fatalf("in front of a Command Prompt, the palette starts with %q, want %q", first(), want)
-	}
+	noneOf("in front of a Command Prompt")
 	plain := func(s string) string { return strings.ReplaceAll(s, "&", "") }
 	if file := win.bar.Menus[0].Items; plain(file[0].Label) != "New Command Prompt" || plain(file[1].Label) != "Files on This computer" {
 		t.Fatalf("the File menu starts with %q and %q", file[0].Label, file[1].Label)
 	}
 	publish(app.State{Shells: shells, DefaultShell: "pwsh", HereMachine: "sky",
 		Machines: []machines.Info{{ID: "sky", Name: "skylake"}}, Saved: []remote.Host{{ID: "sky", Name: "skylake"}}})
-	if want := []string{"New Terminal on skylake", "Files on skylake"}; !slices.Equal(first(), want) {
-		t.Fatalf("in front of a pane on skylake, the palette starts with %q, want %q", first(), want)
+	noneOf("in front of a pane on skylake")
+	items := make([]match.Item, len(win.palette.Items))
+	for i, it := range win.palette.Items {
+		items[i] = match.Item{Title: it.Title, Also: it.Also}
 	}
-	n := 0
-	for _, it := range win.palette.Items {
-		switch it.Title {
-		case "Files on skylake", "Terminal on skylake":
-			n++
-		case "New Terminal, Default Shell":
-			t.Fatal("the palette still has New Terminal, Default Shell")
+	for _, q := range []string{"terminal", "files"} {
+		if !slices.ContainsFunc(match.Rank(items, q), func(f match.Found) bool { return win.palette.Items[f.Index].Title == "skylake" }) {
+			t.Fatalf("%q does not find skylake's line", q)
 		}
-	}
-	if n != 1 {
-		t.Fatalf("the palette has skylake's files and terminal %d times besides the new ones, want the files once", n)
 	}
 	if !slices.ContainsFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "Files in a New Window" }) {
 		t.Fatal("the palette has no Files in a New Window")
@@ -183,5 +175,43 @@ func TestThePaletteNamesTheShellsHere(t *testing.T) {
 	if j := slices.IndexFunc(win.palette.Items, func(it widget.PaletteItem) bool { return it.Title == "Command Prompt" }); j < 0 ||
 		win.palette.Items[j].Detail != "This computer" {
 		t.Fatal("another shell is said to be the default, or is missing")
+	}
+}
+
+// The palette starts with the machines, the one a pane in front was on
+// last first, then those used before it, then the rest.
+func TestThePaletteStartsWithTheMachinesLastUsed(t *testing.T) {
+	win, _, publish := windowStage(t)
+	st := app.State{Saved: []remote.Host{{ID: "sky", Name: "skylake"}, {ID: "bk", Name: "backup"}, {ID: "nas", Name: "nas"}},
+		Machines: []machines.Info{{ID: "sky", Name: "skylake"}}, Connected: []machines.ID{"sky"}}
+	first := func() []string {
+		var titles []string
+		for _, it := range win.palette.Items[:4] {
+			titles = append(titles, it.Title)
+		}
+		return titles
+	}
+	publish(st)
+	if want := []string{"This computer", "skylake", "backup", "nas"}; !slices.Equal(first(), want) {
+		t.Fatalf("with nothing used, the palette starts with %q, want %q", first(), want)
+	}
+	st.MachinesUsed = []machines.ID{"nas", "", "sky"}
+	publish(st)
+	if want := []string{"nas", "This computer", "skylake", "backup"}; !slices.Equal(first(), want) {
+		t.Fatalf("after nas, this computer and skylake, the palette starts with %q, want %q", first(), want)
+	}
+	// A chip still opens what it says on the machine moved.
+	for len(lastWindow.Client().Intents()) > 0 {
+		<-lastWindow.Client().Intents()
+	}
+	win.palette.OnChip(0, 1, lastUI)
+	var got app.OpenFilesOn
+	for got.Machine == "" {
+		if in, ok := nextIntent(t).(app.OpenFilesOn); ok {
+			got = in
+		}
+	}
+	if got.Machine != "nas" {
+		t.Fatalf("Files on the first line opened on %q, want nas", got.Machine)
 	}
 }

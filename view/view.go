@@ -157,6 +157,9 @@ type Window struct {
 	// and the shell such a terminal runs, from the pane in front.
 	hereMachine machines.ID
 	hereShell   string
+	// machinesUsed are the machines a pane in front was last on, the
+	// latest first, as last published.
+	machinesUsed []machines.ID
 	// termProgram is what new shells are told the terminal is called,
 	// and launcherKey the launcher's key, as last published.
 	termProgram string
@@ -1267,22 +1270,14 @@ func (w *Window) servers(saved []remote.Host) {
 		n := len(m.Items)
 		w.bar.Menus[i] = withAccessKeys(m, n-5, n-4, n-3, n-2, n-1)
 	}
-	w.palette.Items, w.paletteIDs = nil, nil
-	for _, c := range commands {
-		if notInPalette[c.id] {
-			continue
-		}
-		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: w.commandTitle(c.id, c.title), Icon: commandIcons[c.id],
-			Hint: hint(c.id), Also: commandAlso[c.id]})
-		w.paletteIDs = append(w.paletteIDs, c.id)
-	}
-	// Every machine by name, the saved servers not connected to as
-	// well, as the launcher has them: one line each, with what opens on
-	// it as chips, a terminal, or this computer's shells by name, its
-	// files, this computer's settings, its log, and for a server saved,
-	// connecting to it, editing it and removing it. Then each folder
-	// saved for it.
-	w.paletteChips = make([][]string, len(w.palette.Items))
+	// First every machine by name, the latest used first, the saved
+	// servers not connected to as well, as the launcher has them: one
+	// line each, with what opens on it as chips, a terminal, or this
+	// computer's shells by name, its files, this computer's settings,
+	// its log, and for a server saved, connecting to it, editing it and
+	// removing it. Then the commands, and each folder saved for a
+	// machine.
+	w.palette.Items, w.paletteIDs, w.paletteChips = nil, nil, nil
 	machineLine := func(m machines.ID) {
 		where, ic := w.nameOf(m), icon.Server
 		var note string
@@ -1334,12 +1329,21 @@ func (w *Window) servers(saved []remote.Host) {
 			}
 		}
 		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: where, Detail: note, Icon: ic, Hint: keys,
-			Also: append(also, "machine", "server", "connect"), Chips: titles, Chip: max(slices.Index(ids, w.paletteLast[m]), 0)})
+			Also: append(also, "machine", "server", "connect", "terminal", "files"), Chips: titles, Chip: max(slices.Index(ids, w.paletteLast[m]), 0)})
 		w.paletteIDs = append(w.paletteIDs, "machine:"+string(m))
 		w.paletteChips = append(w.paletteChips, ids)
 	}
 	for _, m := range w.paletteMachines() {
 		machineLine(m)
+	}
+	for _, c := range commands {
+		if notInPalette[c.id] {
+			continue
+		}
+		w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: w.commandTitle(c.id, c.title), Icon: commandIcons[c.id],
+			Hint: hint(c.id), Also: commandAlso[c.id]})
+		w.paletteIDs = append(w.paletteIDs, c.id)
+		w.paletteChips = append(w.paletteChips, nil)
 	}
 	// A connection's log, of an account no machine above has.
 	for _, m := range w.accounts {
@@ -2223,6 +2227,11 @@ func (w *Window) Update(st app.State, u *gunim.UI) {
 		w.hereMachine, w.hereShell = st.HereMachine, st.HereShell
 		w.buildBar(true)
 	}
+	// The palette's machines go in the order they were last used.
+	if !slices.Equal(st.MachinesUsed, w.machinesUsed) {
+		w.machinesUsed = st.MachinesUsed
+		w.servers(w.saved)
+	}
 	w.echoFor(st, u)
 	if st.Bells > w.bells {
 		// The window the bell rang in asks for attention where it lacks
@@ -2836,8 +2845,9 @@ var notInPalette = map[string]bool{
 	"secrets.open": true, "secrets.window": true, "secrets.add": true, "secrets.addNote": true,
 	"secrets.change": true, "secrets.forget": true, "secrets.export": true, "secrets.import": true,
 	"secrets.addKey": true, "secrets.addPassphrase": true, "secrets.removeKey": true,
-	// A chip on This computer's line.
-	"app.thisComputer": true,
+	// Chips on each machine's line: This computer's settings, and a
+	// new terminal and files on the machine in front.
+	"app.thisComputer": true, "conn.terminal": true, "conn.files": true,
 }
 
 // blankPane stands in for a pane that has nothing to show yet, or any
@@ -3649,7 +3659,8 @@ func (w *Window) commandTitle(id, title string) string {
 
 // paletteMachines are the machines the palette opens things on, as the
 // launcher does: those of machines, then each saved server not among
-// them, which is connected to first.
+// them, which is connected to first. The ones used lately come first,
+// the latest first.
 func (w *Window) paletteMachines() []machines.ID {
 	out := w.machines()
 	for _, h := range w.saved {
@@ -3657,6 +3668,13 @@ func (w *Window) paletteMachines() []machines.ID {
 			out = append(out, m)
 		}
 	}
+	rank := func(m machines.ID) int {
+		if i := slices.Index(w.machinesUsed, m); i >= 0 {
+			return i
+		}
+		return len(w.machinesUsed)
+	}
+	slices.SortStableFunc(out, func(a, b machines.ID) int { return rank(a) - rank(b) })
 	return out
 }
 

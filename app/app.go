@@ -169,6 +169,9 @@ type State struct {
 	// default. It is "" on a server, or where it is not known.
 	HereMachine machines.ID
 	HereShell   string
+	// MachinesUsed are the machines a pane in front was last on, the
+	// latest first, since kakel started.
+	MachinesUsed []machines.ID
 	// ThisComputer is this computer's settings: where a new terminal
 	// starts.
 	ThisComputer ThisComputer
@@ -555,6 +558,9 @@ type (
 type app struct {
 	// c is the first window's client.
 	c gunim.Client
+	// lastOn are the machines a pane in front was last on, the latest
+	// first.
+	lastOn []machines.ID
 	// wins are kakel's windows, cur the one in front, nextWin numbers
 	// them, and winOf is the window each pane is in. intents carries
 	// what each window asks for. openWindow opens another, and opening
@@ -1270,6 +1276,7 @@ func (a *app) publish() {
 	}
 	a.forgetUnused()
 	a.noteTabFocus()
+	a.noteMachineUsed()
 	a.st.Machines = a.machines.Infos()
 	a.notePanes()
 	st := a.st
@@ -1306,6 +1313,7 @@ func (a *app) publish() {
 	st.Shells = slices.Clone(a.st.Shells)
 	st.DefaultShell = a.defaultShell()
 	st.HereMachine, st.HereShell = a.filesKey(a.st.Focus), a.shellHere()
+	st.MachinesUsed = slices.Clone(a.lastOn)
 	st.SavedCopies = slices.Clone(a.st.SavedCopies)
 	st.Connected = a.machines.Connected()
 	st.Dialing = a.machines.Dialing()
@@ -2099,6 +2107,20 @@ func (a *app) machineOf(id string) machines.ID {
 		}
 	}
 	return ""
+}
+
+// noteMachineUsed puts the machine of the pane in front first among
+// the machines used.
+func (a *app) noteMachineUsed() {
+	i := slices.IndexFunc(a.st.Panes, func(p Pane) bool { return p.ID == a.st.Focus })
+	if i < 0 {
+		return
+	}
+	m := a.st.Panes[i].Machine
+	if len(a.lastOn) > 0 && a.lastOn[0] == m {
+		return
+	}
+	a.lastOn = slices.Insert(slices.DeleteFunc(a.lastOn, func(u machines.ID) bool { return u == m }), 0, m)
 }
 
 // openTerminal opens a shell where the focused pane is, on a stage of
