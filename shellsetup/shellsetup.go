@@ -55,6 +55,21 @@ func RouteFor(argv []string) Route {
 	return Posix
 }
 
+// Knows reports whether argv runs a shell the lines here are written
+// for. A program it does not know, such as nushell, python or ssh,
+// would take them as its own input, so a profile running one is left
+// alone.
+func Knows(argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	switch strings.TrimSuffix(strings.ToLower(shells.CommandBase(argv[0])), ".exe") {
+	case "bash", "zsh", "sh", "ksh", "dash", "cmd", "powershell", "pwsh", "wsl":
+		return true
+	}
+	return false
+}
+
 // Lines are what to type into a shell of that kind, one line each,
 // ending with the one that clears the pane.
 //

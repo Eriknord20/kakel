@@ -184,6 +184,9 @@ func (w *Window) cardFor(m machines.ID, name string) cardInfo {
 		if h.Via != "" {
 			c.sub += " · via " + w.nameOf(machines.ID(h.Via))
 		}
+		if profiles := w.profilesOn(m); len(profiles) > 0 && profiles[0].ID == w.serverShells[h.ID] {
+			c.sub += " · " + profiles[0].Name
+		}
 	}
 	return c
 }

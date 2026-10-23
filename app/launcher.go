@@ -292,6 +292,11 @@ func (a *app) launchMachines() []LaunchMachine {
 			}
 			return out
 		}
+		// Each profile by its name, after the terminal the server opens
+		// by default.
+		for i, p := range a.profilesOn(m) {
+			out = slices.Insert(out, 1+i, LaunchAction{ID: "shell:" + p.ID, Title: p.Name})
+		}
 		if slices.Contains(a.machines.Connected(), m) {
 			// A log is of a connection: there is none to show before.
 			out = append(out, LaunchAction{ID: "log", Title: "Connection Log"})
@@ -352,6 +357,14 @@ func (a *app) launchThings(ms []LaunchMachine) []LaunchThing {
 		if m.ID != machines.Local || len(a.st.Shells) == 0 {
 			out = append(out, LaunchThing{Title: "Terminal on " + m.Name, Note: m.Note, Also: []string{"shell", "ssh", "console", "new terminal"},
 				Kind: "terminal", Machine: m.ID, Action: "terminal"})
+		}
+		for _, p := range a.profilesOn(m.ID) {
+			note := m.Note
+			if p.ID == a.st.ServerShells[string(m.ID)] {
+				note = strings.TrimPrefix(note+" · default", " · ")
+			}
+			out = append(out, LaunchThing{Title: p.Name + " on " + m.Name, Note: note, Also: []string{p.ID, "shell", "ssh", "terminal", "new terminal"},
+				Kind: "terminal", Machine: m.ID, Action: "shell:" + p.ID})
 		}
 		out = append(out, LaunchThing{Title: "Files on " + m.Name, Note: m.Note,
 			Also: []string{"folder", "browse", "explorer", "sftp", "file manager", "new file manager"}, Kind: "files", Machine: m.ID, Action: "files"})

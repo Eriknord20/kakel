@@ -152,7 +152,8 @@ func trayIcons() []image.Image {
 }
 
 // traySig changes when the tray icon's menu would: what it lists, the
-// shells, the saved servers and which are connected.
+// shells, the saved servers and their profiles, and which are
+// connected.
 func (a *app) traySig() string {
 	var sig strings.Builder
 	for _, sh := range a.st.Shells {
@@ -163,6 +164,9 @@ func (a *app) traySig() string {
 		sig.WriteString(h.ID + "\x00" + h.Name + "\x00")
 		if h.Window {
 			sig.WriteString("window\x00")
+		}
+		for _, p := range a.profilesOn(machines.ID(h.ID)) {
+			sig.WriteString("\x02" + p.ID + "\x00" + p.Name + "\x00")
 		}
 	}
 	sig.WriteString("\x01")
@@ -192,6 +196,10 @@ func (a *app) trayMenu(gen int) ([]gunim.TrayItem, map[int]func()) {
 				sub = append(sub, gunim.TrayItem{Title: sh.Title, ID: act(func() { a.toTray(func() { a.handle(OpenShellNamed{ID: id}) }) })})
 			}
 		} else {
+			for _, p := range a.profilesOn(m) {
+				id := p.ID
+				sub = append(sub, gunim.TrayItem{Title: p.Name, ID: act(func() { a.toTray(func() { a.handle(OpenShellNamed{ID: id}) }) })})
+			}
 			sub = append(sub, gunim.TrayItem{Title: "Connection Log", ID: act(func() { a.toTray(func() { a.handle(ShowLog{Machine: m}) }) })})
 		}
 		return gunim.TrayItem{Title: title, Items: sub}
@@ -423,9 +431,14 @@ func chordName(k string) string {
 }
 
 // openFirstFor opens the first pane of a window as o asks, a local
-// shell in dir.
+// shell in dir. A command asked for is no profile, so it starts where
+// any other would.
 func (a *app) openFirstFor(o Options, dir string) {
-	dir = a.startDir(dir)
+	start := ""
+	if strings.TrimSpace(o.command) == "" {
+		start = a.keptFolder()
+	}
+	dir = a.startDir(dir, start)
 	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 		a.nextDir = dir
 	}

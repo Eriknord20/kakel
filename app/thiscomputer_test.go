@@ -25,7 +25,7 @@ func TestAShellStartsInTheStartFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, from := range []string{"", home, bin, installed} {
-		if got := a.startDir(from); got != home {
+		if got := a.startDir(from, ""); got != home {
 			t.Fatalf("from %q with no start folder, a shell starts in %s, want home", from, got)
 		}
 	}
@@ -34,11 +34,11 @@ func TestAShellStartsInTheStartFolder(t *testing.T) {
 		t.Fatalf("saved, the state says %+v", a.st.ThisComputer)
 	}
 	for _, from := range []string{"", home, bin} {
-		if got := a.startDir(from); got != work {
+		if got := a.startDir(from, ""); got != work {
 			t.Fatalf("from %q, a shell starts in %s, want %s", from, got, work)
 		}
 	}
-	if got := a.startDir(elsewhere); got != elsewhere {
+	if got := a.startDir(elsewhere, ""); got != elsewhere {
 		t.Fatalf("from %s, a shell starts in %s", elsewhere, got)
 	}
 	// ~ is home, and a folder that isn't there is refused.

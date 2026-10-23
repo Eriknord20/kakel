@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"log"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -153,6 +154,10 @@ type Window struct {
 	shellChoices []app.ShellChoice
 	chosenShell  string
 	defaultShell string
+	// profiles are the profiles on every machine, and serverShells the
+	// one each saved server's new terminal runs, as last published.
+	profiles     []settings.Profile
+	serverShells map[string]string
 	// hereMachine and hereShell are where a new terminal and Files open,
 	// and the shell such a terminal runs, from the pane in front.
 	hereMachine machines.ID
@@ -1272,11 +1277,11 @@ func (w *Window) servers(saved []remote.Host) {
 	}
 	// First every machine by name, the latest used first, the saved
 	// servers not connected to as well, as the launcher has them: one
-	// line each, with what opens on it as chips, a terminal, or this
-	// computer's shells by name, its files, this computer's settings,
-	// its log, and for a server saved, connecting to it, editing it and
-	// removing it. Then the commands, and each folder saved for a
-	// machine.
+	// line each, with what opens on it as chips, a terminal and a
+	// server's profiles, or this computer's shells by name, its files,
+	// this computer's settings, its log, and for a server saved,
+	// connecting to it, editing it and removing it. Then the commands,
+	// and each folder saved for a machine.
 	w.palette.Items, w.paletteIDs, w.paletteChips = nil, nil, nil
 	machineLine := func(m machines.ID) {
 		where, ic := w.nameOf(m), icon.Server
@@ -1303,6 +1308,9 @@ func (w *Window) servers(saved []remote.Host) {
 			}
 		} else {
 			chip("Terminal", "conn.terminal."+cmd)
+			for _, p := range w.profilesOn(m) {
+				chip(p.Name, shellfind.CommandID(p.ID))
+			}
 		}
 		chip("Files", "conn.files."+cmd)
 		if m == "" {
@@ -1387,6 +1395,19 @@ func (w *Window) servers(saved []remote.Host) {
 			w.paletteIDs = append(w.paletteIDs, "shell.pick.")
 		}
 	}
+	// And each profile on a saved server, by its name and the server's.
+	for _, h := range saved {
+		for _, p := range w.profilesOn(machines.ID(h.ID)) {
+			where := h.Name
+			if p.ID == w.serverShells[h.ID] {
+				where += " · default"
+			}
+			id := shellfind.CommandID(p.ID)
+			w.palette.Items = append(w.palette.Items, widget.PaletteItem{Title: p.Name, Detail: where, Icon: icon.SquareTerminal, Hint: hint(id),
+				Also: []string{"new " + p.Name, "new terminal", "terminal", "shell", h.Name}})
+			w.paletteIDs = append(w.paletteIDs, id)
+		}
+	}
 	for i, it := range w.savedCommandItems() {
 		w.palette.Items = append(w.palette.Items, it)
 		w.paletteIDs = append(w.paletteIDs, "conn.saved."+strconv.Itoa(i+1))
@@ -1468,9 +1489,16 @@ func (w *Window) runItem(id string, u *gunim.UI) bool {
 			u.Send(w, app.OpenFilesOn{Machine: m, Path: folders[i].Path})
 		}
 	case strings.HasPrefix(id, shellfind.CommandPrefix):
-		for i, sid := range w.shellIDs() {
-			if sid == id {
-				u.Send(w, app.OpenShellNamed{ID: w.shellChoices[i].ID})
+		if i := slices.Index(w.shellIDs(), id); i >= 0 {
+			u.Send(w, app.OpenShellNamed{ID: w.shellChoices[i].ID})
+			break
+		}
+		// Not one of this computer's: a profile on a saved server.
+		for _, h := range w.saved {
+			for _, p := range w.profilesOn(machines.ID(h.ID)) {
+				if shellfind.CommandID(p.ID) == id {
+					u.Send(w, app.OpenShellNamed{ID: p.ID})
+				}
 			}
 		}
 	case strings.HasPrefix(id, "shell.pick."):
@@ -1574,6 +1602,16 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 			return nil
 		}
 	}
+	// What its new terminal runs: the account's own shell or one of its
+	// profiles, which a new server has none of yet.
+	shellIDs, shellLabels := []string{""}, []string{"Login shell"}
+	for _, p := range w.profiles {
+		if old != nil && p.HostID == old.ID {
+			shellIDs, shellLabels = append(shellIDs, p.ID), append(shellLabels, p.Name)
+		}
+	}
+	shell := widget.NewDropdown(widget.Labels(shellLabels...))
+	shell.Label = "Shell"
 	setup := widget.NewCheckbox("Teach its shell to say what it is doing")
 	forward := widget.NewCheckbox("Forward this machine's SSH agent to it")
 	title, under := "Add a server", ""
@@ -1599,6 +1637,7 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 				via.SetSelected(i, nil)
 			}
 		}
+		shell.SetSelected(max(slices.Index(shellIDs, w.serverShells[old.ID]), 0), nil)
 	}
 	host := func() (remote.Host, string) {
 		h := remote.Host{Name: strings.TrimSpace(name.Text()), Address: strings.TrimSpace(addr.Text()), User: strings.TrimSpace(user.Text())}
@@ -1666,7 +1705,7 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 	applies := func() {
 		window := kind.Selected() == 1
 		via.Disabled = len(ids) <= 1
-		forward.Disabled = window
+		forward.Disabled, shell.Disabled = window, window
 		code.Disabled = !window
 		addr.Placeholder = "host name or address"
 		if window {
@@ -1691,6 +1730,9 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 	if kept != nil {
 		form.Add("Saved keys", kept)
 	}
+	if len(shellIDs) > 1 {
+		form.Add("Shell", shell)
+	}
 	d := widget.NewDialog(title)
 	d.Body = form.Add("", setup).Add("", forward)
 	d.SetButtons("Save", "Cancel")
@@ -1707,7 +1749,7 @@ func (w *Window) serverForm(old *remote.Host, u *gunim.UI) {
 	}
 	d.OnAccept = func(u *gunim.UI) gunim.Intent {
 		h, _ := host()
-		return app.SaveServer{Host: h, Under: under}
+		return app.SaveServer{Host: h, Under: under, Shell: shellIDs[max(0, min(shell.Selected(), len(shellIDs)-1))]}
 	}
 	d.OnDismiss = widget.Sends(app.DialogClosed{})
 	w.openDialog(d, u)
@@ -2219,6 +2261,10 @@ func (w *Window) Update(st app.State, u *gunim.UI) {
 		st.ThisComputer.StartFolder != w.thisComputer.StartFolder || !slices.Equal(st.Favourites, w.favourites) {
 		w.shellChoices, w.chosenShell, w.thisComputer, w.favourites = st.Shells, st.ChosenShell, st.ThisComputer, st.Favourites
 		w.defaultShell = st.DefaultShell
+		w.servers(w.saved)
+	}
+	if !reflect.DeepEqual(st.Profiles, w.profiles) || !maps.Equal(st.ServerShells, w.serverShells) {
+		w.profiles, w.serverShells = st.Profiles, st.ServerShells
 		w.servers(w.saved)
 	}
 	// A new terminal and Files are named for what they open, which
@@ -3825,6 +3871,15 @@ func (w *Window) openMachineMenu(r *sideRow, u *gunim.UI) {
 		heading("Shells")
 		for _, sh := range w.shellChoices {
 			add(icon.SquareTerminal, sh.Title, send(app.OpenShellNamed{ID: sh.ID}))
+		}
+	}
+	if profiles := w.profilesOn(m); len(profiles) > 0 {
+		// A server's profiles, and its account's own shell, which New
+		// Terminal opens only while no profile is its default.
+		heading("Shells")
+		add(icon.SquareTerminal, "Login Shell", send(app.OpenOn{Machine: m, Login: true}))
+		for _, p := range profiles {
+			add(icon.SquareTerminal, p.Name, send(app.OpenShellNamed{ID: p.ID}))
 		}
 	}
 	heading("Files")

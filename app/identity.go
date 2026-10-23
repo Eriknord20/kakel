@@ -33,20 +33,21 @@ var KnownTerminals = []string{"iTerm.app", "WezTerm", "vscode", "Apple_Terminal"
 
 // startLocalSession starts argv here, or the user's shell when it is
 // nil, in dir, as a new shell is started. A shell, rather than one
-// command, is taught when Shell Setup is on.
+// command, is taught when teaches says so.
 func (a *app) startLocalSession(argv []string, dir string, cols, rows int, shell bool) (session.Session, error) {
 	called := ""
 	if a.settings != nil {
 		called = a.settings.TermProgram()
 	}
+	profile, _ := a.profileOf(argv)
 	if dir == "" {
 		cwd, _ := os.Getwd()
-		dir = a.startDir(cwd)
+		dir = a.startDir(cwd, profile.Folder)
 	}
 	sess, err := session.StartLocal(session.LocalConfig{
-		Command: argv, Dir: dir, Env: paneEnv(argv, called), Cols: cols, Rows: rows,
+		Command: argv, Dir: dir, Env: paneEnv(argv, called, profile.Env), Cols: cols, Rows: rows,
 	})
-	if err != nil || !shell || !a.st.ShellSetup {
+	if err != nil || !shell || !a.teaches(argv) {
 		return sess, err
 	}
 	route := argv
@@ -63,12 +64,28 @@ func (a *app) startLocalSession(argv []string, dir string, cols, rows int, shell
 	return sess, nil
 }
 
+// teaches reports whether a shell started with argv is taught to say
+// what it is doing: with Shell Setup on, unless it is a profile's
+// program the teaching is not written for.
+func (a *app) teaches(argv []string) bool {
+	if !a.st.ShellSetup {
+		return false
+	}
+	_, isProfile := a.profileOf(argv)
+	return !isProfile || shellsetup.Knows(argv)
+}
+
 // teachFar teaches a server's shell to say what it is doing, when its
-// saved server says to.
-func (a *app) teachFar(machine machines.ID, sess session.Session) {
+// saved server says to. argv is the command of the profile it runs,
+// nil for the account's own shell, and a profile's program the lines
+// are not written for is left alone.
+func (a *app) teachFar(machine machines.ID, sess session.Session, argv []string) {
+	if len(argv) > 0 && !shellsetup.Knows(argv) {
+		return
+	}
 	for _, h := range a.st.Saved {
 		if machines.ID(h.ID) == machine && h.Setup {
-			if typed := shellsetup.Typed(shellsetup.RouteFor(nil)); len(typed) > 0 {
+			if typed := shellsetup.Typed(shellsetup.RouteFor(argv)); len(typed) > 0 {
 				if _, err := sess.Write(typed); err != nil {
 					a.failed("Couldn't set up the shell on "+a.machines.Name(machine), err.Error())
 				}
@@ -77,16 +94,31 @@ func (a *app) teachFar(machine machines.ID, sess session.Session) {
 	}
 }
 
-// paneEnv is what a shell here is told about the terminal it runs in.
-func paneEnv(argv []string, called string) []string {
+// paneEnv is what a shell here is told about the terminal it runs in,
+// and then the variables its profile sets, each NAME=value, which come
+// last so that one of them can name the terminal otherwise.
+//
+// A WSL shell is also told to carry every one of them into the
+// distribution, on top of the WSLENV the profile sets, or else the one
+// the window runs with.
+func paneEnv(argv []string, called string, set []string) []string {
 	if called == "" {
 		called = build.Name
 	}
 	env := []string{"TERM_PROGRAM=" + called, "TERM_PROGRAM_VERSION=" + build.Version()}
-	if shellfind.IsWSL(argv) {
-		env = append(env, "WSLENV="+shellfind.CarryIntoWSL(os.Getenv("WSLENV"), "TERM_PROGRAM", "TERM_PROGRAM_VERSION"))
+	if !shellfind.IsWSL(argv) {
+		return append(env, set...)
 	}
-	return env
+	carry, was := []string{"TERM_PROGRAM", "TERM_PROGRAM_VERSION"}, os.Getenv("WSLENV")
+	for _, v := range set {
+		name, value, _ := strings.Cut(v, "=")
+		if strings.EqualFold(name, "WSLENV") {
+			was = value
+			continue
+		}
+		env, carry = append(env, v), append(carry, name)
+	}
+	return append(env, "WSLENV="+shellfind.CarryIntoWSL(was, carry...))
 }
 
 // dirHere is the folder of the focused pane's shell, when it is on this

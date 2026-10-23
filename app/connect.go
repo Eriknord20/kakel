@@ -703,6 +703,14 @@ func (a *app) saveServer(in SaveServer) error {
 		if f, ok := a.machines.Get(machines.ID(h.ID)).Files.(interface{ Renamed(string) }); ok {
 			f.Renamed(h.Name)
 		}
+		// The server list takes no field it does not know, so the
+		// profile its new terminal runs is kept with the profiles.
+		if a.settings != nil && a.settings.ServerShell(h.ID) != in.Shell {
+			if err := a.settings.PutServerShell(h.ID, in.Shell); err != nil {
+				a.failed("Server saved, but its shell wasn't", err.Error())
+			}
+			a.st.ServerShells = a.settings.ServerShells()
+		}
 	}
 	// Its key is kept, to be offered for the next server: a key chosen
 	// now, not one it had and was saved with again untouched, which
@@ -728,6 +736,7 @@ func (a *app) removeServer(name machines.ID) error {
 	}
 	a.st.Saved = a.book.Hosts()
 	a.forgetFavourites(name)
+	a.dropProfilesOn(name, called)
 	// Named still by what is left of it, until that goes.
 	a.machines.Removed(name, called)
 	// What the window holds under the name goes with it, as the

@@ -27,6 +27,34 @@ func TestWhichShellAnArgvRuns(t *testing.T) {
 	}
 }
 
+// The lines are typed only into a shell they are written for: a
+// profile running anything else would take them as its own input.
+func TestOnlyAShellTheLinesAreWrittenForIsKnown(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want bool
+	}{
+		{[]string{`C:\Program Files\Git\bin\bash.exe`, "-i", "-l"}, true},
+		{[]string{`C:\msys64\usr\bin\ZSH.EXE`}, true},
+		{[]string{"/bin/sh"}, true},
+		{[]string{"ksh"}, true},
+		{[]string{"dash"}, true},
+		{[]string{`C:\Windows\System32\cmd.exe`, "/k", "echo hi"}, true},
+		{[]string{"powershell.exe", "-NoLogo"}, true},
+		{[]string{"pwsh"}, true},
+		{[]string{`C:\Windows\System32\wsl.exe`, "-d", "Ubuntu"}, true},
+		{[]string{"nu"}, false},
+		{[]string{`C:\Python312\python.exe`}, false},
+		{[]string{"ssh", "-t", "box"}, false},
+		{[]string{"bashful"}, false},
+		{nil, false},
+	} {
+		if got := Knows(tc.argv); got != tc.want {
+			t.Errorf("%q is known: %v, want %v", tc.argv, got, tc.want)
+		}
+	}
+}
+
 // Every shell gets lines to type, and the pane ends up cleared: what
 // is typed is echoed, and a pane that opens on a screenful of setup is
 // worse than one that opens empty.

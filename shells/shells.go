@@ -18,6 +18,10 @@ import (
 // wslPrefix starts the id of every WSL shell, and the rest of the id is the distribution's name.
 const wslPrefix = "wsl:"
 
+// ProfilePrefix starts the id of every shell the user described in a profile, so that no profile's id
+// can be taken for a shell this package finds.
+const ProfilePrefix = "profile:"
+
 // loginID is the id of the login shell, which is the only shell offered away from Windows.
 const loginID = "login"
 

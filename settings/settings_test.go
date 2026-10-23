@@ -1193,3 +1193,196 @@ func TestTheRelayIsRemembered(t *testing.T) {
 		t.Errorf("the last relay came back as %q", got)
 	}
 }
+
+// A profile is added after the rest, put in place of the one with its
+// id when edited, and taken out alone; what is saved comes back.
+func TestProfilesAreAddedEditedAndRemoved(t *testing.T) {
+	path := at(t)
+	set, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bash := Profile{ID: "profile:git-bash", Name: "Git Bash", Command: []string{`C:\Program Files\Git\bin\bash.exe`, "-i", "-l"}}
+	nu := Profile{ID: "profile:nu", Name: "Nushell", Command: []string{"nu"}, Env: []string{"FOO=bar"}}
+	for _, p := range []Profile{bash, nu} {
+		if err := set.PutProfile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bash.Name, bash.Folder = "Bash", `C:\src`
+	if err := set.PutProfile(bash); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := func(list []Profile) []string {
+		var out []string
+		for _, p := range list {
+			out = append(out, p.ID)
+		}
+		return out
+	}
+	got := again.Profiles()
+	if want := []string{"profile:git-bash", "profile:nu"}; !slices.Equal(ids(got), want) {
+		t.Fatalf("read back, the profiles are %v, want %v", ids(got), want)
+	}
+	if got[0].Name != "Bash" || got[0].Folder != `C:\src` || !slices.Equal(got[1].Env, nu.Env) {
+		t.Fatalf("read back, the profiles are %+v", got)
+	}
+	if err := again.DropProfile("profile:git-bash"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(again.Profiles()); !slices.Equal(got, []string{"profile:nu"}) {
+		t.Fatalf("one removed, the profiles are %v", got)
+	}
+}
+
+// A profile that names nothing to open, or an id twice over, is turned
+// away on the way in and on the way out.
+func TestAProfileThatCannotBeOpenedIsRefused(t *testing.T) {
+	for _, c := range []struct {
+		what string
+		body string
+		put  []Profile
+	}{
+		{"no id", `{"version":1,"profiles":[{"id":"","name":"x","command":["nu"]}]}`,
+			[]Profile{{Name: "x", Command: []string{"nu"}}}},
+		{"no command", `{"version":1,"profiles":[{"id":"profile:x","name":"x","command":[]}]}`,
+			[]Profile{{ID: "profile:x", Name: "x"}}},
+		{"an empty program", `{"version":1,"profiles":[{"id":"profile:x","name":"x","command":[""]}]}`,
+			[]Profile{{ID: "profile:x", Name: "x", Command: []string{""}}}},
+		{"an id twice", `{"version":1,"profiles":[{"id":"profile:x","name":"x","command":["nu"]},{"id":"profile:x","name":"y","command":["sh"]}]}`,
+			nil},
+	} {
+		path := at(t)
+		if err := os.WriteFile(path, []byte(c.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Errorf("a file with %s loaded", c.what)
+		}
+		set := settingsAt(t)
+		for _, p := range c.put {
+			if err := set.PutProfile(p); err == nil {
+				t.Errorf("a profile with %s was saved", c.what)
+			}
+		}
+	}
+}
+
+// A setting a newer kakel wrote is still there after a profile is
+// saved.
+func TestSavingAProfileKeepsASettingFromANewerKakel(t *testing.T) {
+	path := at(t)
+	if err := os.WriteFile(path, []byte(`{"version": 1, "andThis": "x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.PutProfile(Profile{ID: "profile:nu", Name: "Nushell", Command: []string{"nu"}}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"andThis": "x"`) || !strings.Contains(string(raw), `"profile:nu"`) {
+		t.Fatalf("written back:\n%s", raw)
+	}
+}
+
+// A server's profile comes back on its server, and the profile its new
+// terminal runs comes back until it is cleared, or the profile or the
+// server's profiles are removed.
+func TestAServersShellIsOneOfItsProfiles(t *testing.T) {
+	path := at(t)
+	set, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []Profile{
+		{ID: "profile:tmux", Name: "tmux", HostID: "srv", Command: []string{"tmux", "new", "-A"}},
+		{ID: "profile:htop", Name: "htop", HostID: "srv", Command: []string{"htop"}},
+		{ID: "profile:nu", Name: "Nushell", Command: []string{"nu"}},
+	} {
+		if err := set.PutProfile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := set.PutServerShell("srv", "profile:tmux"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.Profiles()[0].HostID; got != "srv" {
+		t.Fatalf("read back, the profile is on %q", got)
+	}
+	if got := again.ServerShell("srv"); got != "profile:tmux" {
+		t.Fatalf("read back, the server runs %q", got)
+	}
+	if err := again.PutServerShell("srv", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := again.ServerShells(); len(got) != 0 {
+		t.Fatalf("cleared, the servers run %v", got)
+	}
+	if err := again.PutServerShell("srv", "profile:tmux"); err != nil {
+		t.Fatal(err)
+	}
+	if err := again.DropProfile("profile:tmux"); err != nil {
+		t.Fatal(err)
+	}
+	if got := again.ServerShell("srv"); got != "" {
+		t.Fatalf("its profile removed, the server runs %q", got)
+	}
+	if err := again.PutServerShell("srv", "profile:htop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := again.DropProfilesOn("srv"); err != nil {
+		t.Fatal(err)
+	}
+	if got, left := again.ServerShell("srv"), again.Profiles(); got != "" || len(left) != 1 || left[0].ID != "profile:nu" {
+		t.Fatalf("its profiles removed, the server runs %q and the profiles are %+v", got, left)
+	}
+}
+
+// A server can run only a profile on that server: one that is not
+// there, or is this computer's or another server's, is turned away on
+// the way in and on the way out.
+func TestAServersShellThatIsNotItsProfileIsRefused(t *testing.T) {
+	profiles := `"profiles":[{"id":"profile:nu","name":"Nushell","command":["nu"]},` +
+		`{"id":"profile:top","name":"top","hostId":"other","command":["top"]}]`
+	for _, c := range []struct {
+		what, host, id string
+	}{
+		{"no such profile", "srv", "profile:gone"},
+		{"this computer's profile", "srv", "profile:nu"},
+		{"another server's profile", "srv", "profile:top"},
+		{"no server", "", "profile:nu"},
+	} {
+		path := at(t)
+		body := `{"version":1,` + profiles + `,"serverShells":{"` + c.host + `":"` + c.id + `"}}`
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Errorf("a file naming %s loaded", c.what)
+		}
+		if err := os.WriteFile(path, []byte(`{"version":1,`+profiles+`}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		set, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := set.PutServerShell(c.host, c.id); err == nil {
+			t.Errorf("%s was saved", c.what)
+		}
+	}
+}

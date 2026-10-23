@@ -6,6 +6,7 @@ import (
 
 	"github.com/marrasen/kakel/machines"
 	"github.com/marrasen/kakel/session"
+	"github.com/marrasen/kakel/settings"
 	shellfind "github.com/marrasen/kakel/shells"
 )
 
@@ -47,7 +48,8 @@ func (a *app) scanShells() {
 			if err != nil {
 				a.failed("Couldn't list the shells here", err.Error())
 			}
-			a.found, a.scanned = found, err == nil
+			a.detected, a.scanned = found, err == nil
+			a.mergeShells()
 			a.ownShell = ""
 			if argv, err := session.DefaultShell(); err == nil {
 				if sh, ok := shellfind.Running(found, argv); ok {
@@ -68,14 +70,6 @@ func (a *app) scanShells() {
 				if id, chosen := a.settings.Shell(); chosen && a.shellCommand(id) == nil {
 					a.sayShellGone(id)
 				}
-			}
-			a.st.Shells = nil
-			for _, s := range found {
-				choice := ShellChoice{ID: s.ID, Title: s.Title}
-				if s.Distro != "" {
-					choice.Folder = shellfind.WSLRoot(s.Distro)
-				}
-				a.st.Shells = append(a.st.Shells, choice)
 			}
 		}
 	}()
@@ -136,6 +130,13 @@ func (a *app) localShell() []string {
 		return nil
 	}
 	argv := a.shellCommand(id)
+	// A profile is offered whether or not its program is still here, so
+	// whether it is is asked as it starts.
+	if argv != nil && strings.HasPrefix(id, shellfind.ProfilePrefix) {
+		if _, err := lookPath(argv[0]); err != nil {
+			argv = nil
+		}
+	}
 	if argv == nil {
 		// The default shell opens instead.
 		a.sayShellGone(id)
@@ -150,7 +151,11 @@ func (a *app) sayShellGone(id string) {
 		return
 	}
 	a.shellGoneSaid = true
-	a.failed("Shell not found", strings.TrimPrefix(id, "wsl:")+" is no longer installed. New terminals start the default shell. Choose another in the palette, under Start … in New Terminals.")
+	name := strings.TrimPrefix(id, "wsl:")
+	if i := slices.IndexFunc(a.st.Profiles, func(p settings.Profile) bool { return p.ID == id }); i >= 0 {
+		name = a.st.Profiles[i].Name
+	}
+	a.failed("Shell not found", name+" is no longer installed. New terminals start the default shell. Choose another in the palette, under Start … in New Terminals.")
 }
 
 // shellCommand is the command that starts shell id, or nil when this
@@ -183,12 +188,17 @@ func (a *app) pickShell(id string) error {
 
 // likeHere has the next terminal here start the shell the focused pane
 // runs, in its folder: another Command Prompt from a Command Prompt, the
-// same WSL distribution from a WSL shell. A shell picked for it already,
-// a pane on a server, and one running a command rather than a shell
-// leave it as it is.
+// same WSL distribution from a WSL shell. A pane on a server has the
+// next terminal there run what it runs (see likeFar). A shell picked
+// for it already, and one running a command rather than a shell leave
+// it as it is.
 func (a *app) likeHere() {
 	id := a.here()
-	if a.nextShell != nil || a.machineOf(id) != "" {
+	if a.machineOf(id) != "" {
+		a.likeFar(id)
+		return
+	}
+	if a.nextShell != nil {
 		return
 	}
 	if _, ok := a.commands[id]; ok {
@@ -216,15 +226,23 @@ func (a *app) shellTitle(id, title string) string {
 	if !ok || s.Path == "" {
 		return title
 	}
+	// A profile may name its program as found on the PATH, while the
+	// title is the path it was started from.
+	path := s.Path
+	if !strings.ContainsAny(path, `/\`) {
+		if found, err := lookPath(path); err == nil {
+			path = found
+		}
+	}
 	admin, rest := "", title
 	if r, cut := strings.CutPrefix(title, "Administrator: "); cut {
 		admin, rest = "Administrator: ", r
 	}
 	switch {
-	case strings.EqualFold(rest, s.Path):
+	case strings.EqualFold(rest, path):
 		return admin + s.Title
-	case len(rest) > len(s.Path) && strings.EqualFold(rest[:len(s.Path)], s.Path) && strings.HasPrefix(rest[len(s.Path):], " - "):
-		return admin + s.Title + rest[len(s.Path):]
+	case len(rest) > len(path) && strings.EqualFold(rest[:len(path)], path) && strings.HasPrefix(rest[len(path):], " - "):
+		return admin + s.Title + rest[len(path):]
 	}
 	return title
 }

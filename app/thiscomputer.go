@@ -84,9 +84,10 @@ func FolderHere(path string) (string, error) {
 // installed program's own folder, where it was installed before, and
 // Windows's system folder, which a shortcut, a desktop's menu or a start
 // with the computer gives it.
-// From one of those it starts in the start folder This Computer sets,
-// or else at home.
-func (a *app) startDir(cwd string) string {
+// From one of those it starts in start, a profile's folder, or else in
+// the start folder This Computer sets, or else at home, taking the
+// first of them that is there.
+func (a *app) startDir(cwd, start string) string {
 	home, _ := os.UserHomeDir()
 	defaults := []string{home}
 	if dir, _, err := install.Where(installer()); err == nil {
@@ -107,11 +108,13 @@ func (a *app) startDir(cwd string) string {
 	if !byDefault {
 		return cwd
 	}
+	tries := []string{start}
 	if a.settings != nil {
-		if start := a.settings.Local(); start != "" {
-			if fi, err := os.Stat(start); err == nil && fi.IsDir() {
-				return start
-			}
+		tries = append(tries, a.settings.Local())
+	}
+	for _, dir := range tries {
+		if fi, err := os.Stat(dir); dir != "" && err == nil && fi.IsDir() {
+			return dir
 		}
 	}
 	if home != "" {

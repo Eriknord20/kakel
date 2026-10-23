@@ -1,6 +1,9 @@
 package shells
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 // CommandBase is the program name in the first word of a command line.
 //
@@ -19,4 +22,56 @@ func CommandBase(argv0 string) string {
 		return argv0[i+1:]
 	}
 	return argv0
+}
+
+// SplitCommandLine is a command line as its program and arguments.
+// Spaces and tabs part the words, and double quotes hold a word with
+// spaces together, as Windows Terminal writes a profile's command:
+// `"C:\Program Files\Git\bin\bash.exe" -i -l`.
+//
+// A backslash is a letter like any other, because a Windows path is
+// full of them. So a word cannot hold a double quote.
+func SplitCommandLine(line string) ([]string, error) {
+	var (
+		argv   []string
+		word   strings.Builder
+		inWord bool
+		quoted bool
+	)
+	for _, r := range line {
+		switch {
+		case r == '"':
+			quoted = !quoted
+			inWord = true
+		case !quoted && (r == ' ' || r == '\t'):
+			if inWord {
+				argv = append(argv, word.String())
+				word.Reset()
+				inWord = false
+			}
+		default:
+			word.WriteRune(r)
+			inWord = true
+		}
+	}
+	if quoted {
+		return nil, errors.New("unclosed quote")
+	}
+	if inWord {
+		argv = append(argv, word.String())
+	}
+	return argv, nil
+}
+
+// JoinCommandLine is argv as SplitCommandLine reads it back: a word
+// with a space or a tab in it, or none at all, is put in quotes.
+func JoinCommandLine(argv []string) string {
+	words := make([]string, len(argv))
+	for i, w := range argv {
+		if w == "" || strings.ContainsAny(w, " \t") {
+			w = `"` + w + `"`
+		}
+		words[i] = w
+	}
+	return strings.Join(words, " ")
 }

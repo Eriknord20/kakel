@@ -101,6 +101,12 @@ type settingsPane struct {
 	shellIDs   []string
 	known      *widget.Dropdown
 	pasteCheck *widget.Switch
+	// shellTitles are shell's items beside shellIDs: a renamed profile
+	// changes them while its ID stays.
+	shellTitles []string
+	// profiles lists the profiles, which editP and removeP need one of.
+	profiles       *widget.Label
+	editP, removeP *widget.Button
 
 	// Notifications.
 	iface         *widget.Checkbox
@@ -405,10 +411,21 @@ func (p *settingsPane) terminal() gunim.Node {
 	}
 	p.pasteCheck = widget.NewSwitch("")
 	p.pasteCheck.OnChange = func(on bool, u *gunim.UI) gunim.Intent { p.send(app.SetPasteCheck{On: on}, u); return nil }
+	p.profiles = widget.NewLabel("")
+	addP := widget.NewButton("Add Profile…")
+	addP.OnClick = func(u *gunim.UI) gunim.Intent { p.w.profileDialog(p.st.Profiles, nil, u); return nil }
+	p.editP = widget.NewButton("Edit Profile…")
+	p.editP.OnClick = func(u *gunim.UI) gunim.Intent { p.w.editProfilePickerFrom(p.st.Profiles, u); return nil }
+	p.removeP = widget.NewButton("Remove Profile…")
+	p.removeP.OnClick = func(u *gunim.UI) gunim.Intent { p.w.removeProfilePickerFrom(p.st.Profiles, u); return nil }
 	return settingsPage(
 		settingsSection("This computer",
 			settingRow("Start in", "New terminals start here, unless kakel was started in a folder of its own, or they open from a terminal in another.", p.startIn.node),
 			settingRow("Shell", "What a new terminal here runs.", p.shell)),
+		settingsSection("Profiles",
+			faintLabel("Shells you add, here or on a saved server, such as Git Bash, MSYS2 or tmux, offered with the ones kakel finds. A profile has its own folder and variables."),
+			p.profiles,
+			buttons(addP, p.editP, p.removeP)),
 		settingsSection("Terminal identity",
 			settingRow("TERM_PROGRAM", "What programs are told the terminal is called. Blank says kakel. Another name can turn on features such as images, and can bring sequences that show as text. For new panes.", p.termProgram.node),
 			settingRow("Known terminals", "", p.known)),
@@ -619,14 +636,16 @@ func (p *settingsPane) show(st app.State, u *gunim.UI) {
 	for _, sh := range st.Shells {
 		titles, ids = append(titles, sh.Title), append(ids, sh.ID)
 	}
-	if !slices.Equal(ids, p.shellIDs) {
-		p.shellIDs = ids
+	if !slices.Equal(ids, p.shellIDs) || !slices.Equal(titles, p.shellTitles) {
+		p.shellIDs, p.shellTitles = ids, titles
 		p.shell.SetItems(widget.Labels(titles...))
 	}
 	p.shell.SetSelected(max(slices.Index(p.shellIDs, st.ChosenShell), 0), nil)
 	p.termProgram.show(st.TermProgram, u)
 	p.proxy.show(st.Serving.Proxy, u)
 	setOn(p.pasteCheck, st.PasteCheck)
+	p.profiles.Text = p.w.profilesSays(st.Profiles)
+	p.editP.Disabled, p.removeP.Disabled = len(st.Profiles) == 0, len(st.Profiles) == 0
 	p.known.SetSelected(0, nil)
 	if i := slices.Index(app.KnownTerminals, st.TermProgram); i >= 0 {
 		p.known.SetSelected(i+1, nil)

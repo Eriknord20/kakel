@@ -238,13 +238,16 @@ func (a *app) startAgainOr(id string, dial bool) error {
 	}
 	a.sayIfMoved(id, t, machine)
 	a.restarting[id] = true
+	// The profile it ran, run again.
+	profile, _ := a.farProfile(machine, a.farRuns[id])
+	cfg := a.farConfig(machine, a.farRuns[id], size.Cols, size.Rows)
 	go func() {
-		sess, err := conn.Shell(a.ctx, a.shellConfig(machine, size.Cols, size.Rows))
+		sess, err := conn.Shell(a.ctx, cfg)
 		a.events <- func() {
 			if err == nil {
 				// Taught again, as the shell is new: its paths and the
 				// ends of its commands are said again.
-				a.teachFar(machine, sess)
+				a.teachFar(machine, sess, profile.Command)
 				err = a.restarted(id, t, sess)
 			}
 			if err != nil {

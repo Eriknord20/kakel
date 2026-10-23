@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -87,6 +88,15 @@ type stored struct {
 	// Shell is the shell a new pane runs, by the id the shell list gives
 	// it.
 	Shell *string `json:"shell,omitempty"`
+
+	// Profiles are the shells the user described, in the order they
+	// were added.
+	Profiles []Profile `json:"profiles,omitempty"`
+
+	// ServerShells are the profile each saved server's new terminal
+	// runs, by the server's id. The server list turns away a field it
+	// does not know, so they are kept here.
+	ServerShells map[string]string `json:"serverShells,omitempty"`
 
 	// AgentMay is what the hand-over dialog's tick boxes were last set
 	// to. A field left out is a box that was not ticked.
@@ -398,6 +408,31 @@ func sorted(names []string) []string {
 	return out
 }
 
+// Profile is a shell the user described, offered beside the shells
+// kakel finds, as Windows Terminal offers its profiles.
+type Profile struct {
+	// ID names the profile in Shell and in a command id. It is given
+	// once, from the first name, and a rename leaves it as it was, so a
+	// shell kept for new terminals and a key bound to the profile stay
+	// with it.
+	ID   string `json:"id"`
+	Name string `json:"name"`
+
+	// HostID is the id of the saved server the profile runs on, and
+	// empty for this computer.
+	HostID string `json:"hostId,omitempty"`
+
+	// Command is the program, then its arguments.
+	Command []string `json:"command"`
+
+	// Folder is where a new terminal on the profile starts, in place of
+	// the start folder; empty for that.
+	Folder string `json:"folder,omitempty"`
+
+	// Env are variables the shell is started with, each NAME=value.
+	Env []string `json:"env,omitempty"`
+}
+
 // AgentMay is what a hand-over allows an agent beyond reading a pane and
 // typing into it.
 //
@@ -646,6 +681,112 @@ func (s *Settings) DropCommand(line string) error {
 	return s.putCommands(func(have []SavedCommand) []SavedCommand {
 		return dropLine(have, line)
 	})
+}
+
+// Profiles are the shells the user described, in the order they were
+// added.
+func (s *Settings) Profiles() []Profile {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.have.Profiles)
+}
+
+// PutProfile puts a profile in place of the one with its id, or after
+// the rest when none has it, and saves.
+func (s *Settings) PutProfile(p Profile) error {
+	return s.putProfiles(func(have []Profile) []Profile {
+		if i := slices.IndexFunc(have, func(at Profile) bool { return at.ID == p.ID }); i >= 0 {
+			have[i] = p
+			return have
+		}
+		return append(have, p)
+	})
+}
+
+// DropProfile takes the profile with id out of the list and saves.
+func (s *Settings) DropProfile(id string) error {
+	return s.putProfiles(func(have []Profile) []Profile {
+		return slices.DeleteFunc(have, func(at Profile) bool { return at.ID == id })
+	})
+}
+
+// DropProfilesOn takes the profiles on the saved server hostID out of
+// the list, and the one its new terminal runs, and saves.
+func (s *Settings) DropProfilesOn(hostID string) error {
+	if hostID == "" {
+		return errors.New("settings: no server named")
+	}
+	return s.putProfiles(func(have []Profile) []Profile {
+		return slices.DeleteFunc(have, func(at Profile) bool { return at.HostID == hostID })
+	})
+}
+
+// putProfiles rereads the file, edits the list it holds and saves. A
+// server's new terminal no longer runs a profile taken out.
+func (s *Settings) putProfiles(edit func([]Profile) []Profile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.rereadLocked(); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnsaveable, err)
+	}
+	before := s.have
+	s.have.Profiles = edit(slices.Clone(s.have.Profiles))
+	s.have.ServerShells = maps.Clone(s.have.ServerShells)
+	maps.DeleteFunc(s.have.ServerShells, func(host, id string) bool { return !hasProfile(s.have.Profiles, host, id) })
+	if err := s.saveLocked(); err != nil {
+		s.have = before
+		return err
+	}
+	return nil
+}
+
+// ServerShell is the id of the profile the saved server hostID's new
+// terminal runs, "" for the account's own shell.
+func (s *Settings) ServerShell(hostID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.have.ServerShells[hostID]
+}
+
+// ServerShells are the profile each saved server's new terminal runs,
+// by the server's id.
+func (s *Settings) ServerShells() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maps.Clone(s.have.ServerShells)
+}
+
+// PutServerShell has the saved server hostID's new terminal run the
+// profile profileID, or the account's own shell when that is empty,
+// and saves.
+func (s *Settings) PutServerShell(hostID, profileID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// The file first, for the same reason PutServe reads it first.
+	if err := s.rereadLocked(); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnsaveable, err)
+	}
+	before := s.have
+	s.have.ServerShells = maps.Clone(s.have.ServerShells)
+	if profileID == "" {
+		delete(s.have.ServerShells, hostID)
+	} else {
+		if s.have.ServerShells == nil {
+			s.have.ServerShells = map[string]string{}
+		}
+		s.have.ServerShells[hostID] = profileID
+	}
+	if err := s.saveLocked(); err != nil {
+		s.have = before
+		return err
+	}
+	return nil
+}
+
+// hasProfile reports whether profiles holds id on the saved server
+// hostID.
+func hasProfile(profiles []Profile, hostID, id string) bool {
+	return slices.ContainsFunc(profiles, func(p Profile) bool { return p.ID == id && p.HostID == hostID })
 }
 
 // Tunnels are the tunnels the user asked to keep, newest first.
@@ -1631,6 +1772,29 @@ func check(file stored) error {
 	// name is turned away: it names nothing and could not be found.
 	if th := file.Theme; th != nil && *th == "" {
 		return errors.New("the theme has no name")
+	}
+	profiles := make(map[string]bool, len(file.Profiles))
+	for i, p := range file.Profiles {
+		// What a profile runs is the window's business, so only one
+		// that names nothing is turned away: it could not be opened.
+		if p.ID == "" {
+			return fmt.Errorf("profile %d has no id", i+1)
+		}
+		if len(p.Command) == 0 || p.Command[0] == "" {
+			return fmt.Errorf("profile %d, %q, has nothing to run", i+1, p.Name)
+		}
+		// One id twice over opens the first whichever is picked.
+		if profiles[p.ID] {
+			return fmt.Errorf("profile %d, %q, is in the list twice", i+1, p.ID)
+		}
+		profiles[p.ID] = true
+	}
+	for host, id := range file.ServerShells {
+		// A profile that is not there, or is another machine's, could
+		// not be opened on the server.
+		if host == "" || !hasProfile(file.Profiles, host, id) {
+			return fmt.Errorf("server %q runs %q, which is not one of its profiles", host, id)
+		}
 	}
 	kept := make(map[string]bool, len(file.Keys))
 	for i, path := range file.Keys {

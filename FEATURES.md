@@ -12,6 +12,20 @@ The whole list. The [README](README.md) has the short version.
 - **Local shells and SSH.** One `session.Session` interface with two
   implementations. Nothing above it — the emulator, the grid, the
   window — can tell the difference.
+- **Profiles for the shells kakel does not find.** Settings › Terminal ›
+  Profiles adds Git Bash, MSYS2, nushell or `ssh host` by its command
+  line, as Windows Terminal does: `"C:\Program Files\Git\bin\bash.exe" -i -l`.
+  A profile may name a folder to start in and variables to set, one
+  `NAME=value` a line. It is offered with the shells found here, in the
+  palette, the split chooser, the launcher, the tray and the Shell
+  setting, and can be the shell new terminals start. Renaming it keeps
+  the shell chosen and the shortcuts bound to it. A profile on a saved
+  server, such as `tmux new -A -s main` or `htop`, runs there in place
+  of the account's shell, and the server's dialog can make it what New
+  Terminal opens there; Login Shell on its menu still opens the plain
+  shell. It needs a POSIX server: variables go through `env` and the
+  folder through `cd`, and `.profile` is read only when the command
+  asks for a login shell, as `bash -l` does.
 - **Connections, not just shells.** One SSH connection carries several
   things at once, so a second terminal on a machine is a second channel
   rather than a second login. A command runs on a channel of the same
@@ -361,7 +375,8 @@ install and no profile to edit.
 
 - **On this machine it is on**, and "Shell Setup" on the Machine menu
   turns it off. It is invisible: kakel
-  builds the line for whichever shell the pane runs.
+  builds the line for whichever shell the pane runs. A profile gets it
+  only when it runs one of the shells in the table below.
 - **On a server it is off**, and "Teach its shell to say what it is
   doing" in the server dialog turns it on. It is off because the line goes into whatever
   login shell that account has. bash and zsh understand it; fish, a
@@ -398,6 +413,7 @@ What each shell is told:
 | PowerShell, pwsh | OSC 7, wrapping the prompt already there | yes, with PSReadLine |
 | bash, zsh, WSL, a server's login shell | OSC 7 | yes |
 | Command Prompt | OSC 9;9 | no |
+| A profile running any other program, such as nushell or ssh | none | no |
 
 The Command Prompt builds its prompt out of what `cmd.exe` substitutes,
 and none of those pieces makes a URL, so it sends the plain path that

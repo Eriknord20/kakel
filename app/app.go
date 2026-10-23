@@ -163,6 +163,13 @@ type State struct {
 	// ChosenShell, or the user's own as found among Shells; "" where
 	// that is not known.
 	DefaultShell string
+	// Profiles are the shells the user described, on this computer and
+	// on saved servers, in the order they were added. Each of this
+	// computer's is among Shells too, once those are found.
+	// ServerShells are the profile each saved server's new terminal
+	// runs, by the server's ID.
+	Profiles     []settings.Profile
+	ServerShells map[string]string
 	// HereMachine is the machine a new terminal and New Files open on,
 	// from the pane in front, and HereShell the name of the shell such
 	// a terminal runs on this computer: the one in front, or else the
@@ -489,8 +496,13 @@ type (
 	SetPasteCheck struct{ On bool }
 	// RunSavedCommand runs a command kept from before.
 	RunSavedCommand struct{ Saved settings.SavedCommand }
-	// OpenOn opens a terminal on Machine, "" for this computer.
-	OpenOn struct{ Machine machines.ID }
+	// OpenOn opens a terminal on Machine, "" for this computer. Login
+	// opens the account's own shell on a server whose new terminal runs
+	// a profile.
+	OpenOn struct {
+		Machine machines.ID
+		Login   bool
+	}
 	// FilesOn opens a file manager pane on Machine, at Path, or at home
 	// when Path is empty.
 	FilesOn struct {
@@ -538,10 +550,12 @@ type (
 		NoAsk bool
 	}
 	// SaveServer saves a server, in place of the one named Under when
-	// that is set.
+	// that is set. Shell is the ID of the profile its new terminal runs,
+	// empty for the account's own shell.
 	SaveServer struct {
 		Host  remote.Host
 		Under string
+		Shell string
 	}
 	// RemoveServer forgets a saved server.
 	RemoveServer struct{ ID machines.ID }
@@ -749,6 +763,11 @@ type app struct {
 	// and nextDir the folder the next local one starts in.
 	nextShell []string
 	nextDir   string
+	// nextFar is what the next terminal on a saved server runs, once: a
+	// profile's ID, or loginShell. farRuns is the profile each server
+	// pane runs, to start it again and to open another like it.
+	nextFar map[machines.ID]string
+	farRuns map[string]string
 	// traySet shows kakel's icon in the tray, tray is the icon as shown,
 	// and handovers are the command lines kakels started meanwhile hand
 	// this one.
@@ -788,9 +807,11 @@ type app struct {
 	// something typed, and prompt is that window as it is.
 	openPrompt PromptOpener
 	prompt     promptState
-	// found are the shells on this machine, once scanned says they have
-	// been looked for; shellGoneSaid says the kept shell was found gone,
-	// which is said once a run.
+	// detected are the shells findShells found on this machine, once
+	// scanned says they have been looked for, and found are those and
+	// then the profiles; shellGoneSaid says the kept shell was found
+	// gone, which is said once a run.
+	detected      []shellfind.Shell
 	found         []shellfind.Shell
 	scanned       bool
 	shellGoneSaid bool
@@ -876,6 +897,8 @@ func newApp(c gunim.Client, sh *screen.Shells) *app {
 		linksAt:      map[string]*atomic.Pointer[machines.ID]{},
 		argvs:        map[string][]string{},
 		farHost:      map[string]string{},
+		nextFar:      map[machines.ID]string{},
+		farRuns:      map[string]string{},
 		typed:        map[string]*typedLog{},
 		restarts:     map[string]int{},
 		endings:      map[string]int{},
@@ -1092,6 +1115,9 @@ func (a *app) loadSettings() {
 			a.st.PaneTitles = s.PaneTitles()
 			a.st.SavedCommands = s.Commands()
 			a.st.ChosenShell, _ = s.Shell()
+			a.st.Profiles = s.Profiles()
+			a.st.ServerShells = s.ServerShells()
+			a.mergeShells()
 			a.st.ThisComputer.StartFolder = s.Local()
 			a.st.ShellSetup = s.ShellSetup()
 			a.st.PasteCheck = s.PasteCheck()
@@ -1164,6 +1190,10 @@ func failedTitle(in gunim.Intent) string {
 		return "Couldn't take the files dropped"
 	case SaveThisComputer:
 		return "Couldn't save This Computer's settings"
+	case SaveProfile:
+		return "Couldn't save the profile"
+	case RemoveProfile:
+		return "Couldn't remove the profile"
 	case SetLauncherKey:
 		return "Couldn't change the launcher's key"
 	case SetLauncherFiles:
@@ -1311,6 +1341,8 @@ func (a *app) publish() {
 	st.Windows = slices.Clone(a.st.Windows)
 	st.SavedCommands = slices.Clone(a.st.SavedCommands)
 	st.Shells = slices.Clone(a.st.Shells)
+	st.Profiles = slices.Clone(a.st.Profiles)
+	st.ServerShells = maps.Clone(a.st.ServerShells)
 	st.DefaultShell = a.defaultShell()
 	st.HereMachine, st.HereShell = a.filesKey(a.st.Focus), a.shellHere()
 	st.MachinesUsed = slices.Clone(a.lastOn)
@@ -1573,6 +1605,10 @@ func (a *app) handle(in gunim.Intent) {
 	case RunSavedCommand:
 		err = a.runSavedCommand(in.Saved)
 	case OpenShellNamed:
+		if p, ok := a.serverProfile(in.ID); ok {
+			err = a.open(a.runNextOn(p), Placement{})
+			break
+		}
 		argv := a.shellCommand(in.ID)
 		if argv == nil {
 			err = fmt.Errorf("this machine has no shell called %q", in.ID)
@@ -1599,11 +1635,18 @@ func (a *app) handle(in gunim.Intent) {
 		err = a.pickShell(in.ID)
 	case SaveThisComputer:
 		err = a.saveThisComputer(in)
+	case SaveProfile:
+		err = a.saveProfile(in.Profile)
+	case RemoveProfile:
+		err = a.removeProfile(in.ID)
 	case OpenDefaultShell:
 		if err = a.pickShell(""); err == nil {
 			err = a.open("", Placement{})
 		}
 	case OpenOn:
+		if in.Login && in.Machine != "" {
+			a.nextFar[in.Machine] = loginShell
+		}
 		err = a.open(in.Machine, Placement{})
 	case FilesOn:
 		err = a.filesOn(in.Machine, in.Path)
@@ -1924,6 +1967,12 @@ func (a *app) openThen(machine machines.ID, at Placement, then func(id string, e
 	if then == nil {
 		then = func(string, error) {}
 	}
+	// Taken now, so the terminal after this one runs its own; one that
+	// connects first is given it back.
+	run := ""
+	if machine != "" {
+		run = a.farRun(machine)
+	}
 	if window, key, far := machine.Far(); far {
 		// Beyond a window: that window opens it, on its connection.
 		a.next++
@@ -1948,6 +1997,7 @@ func (a *app) openThen(machine machines.ID, at Placement, then func(id string, e
 				then("", err)
 				return
 			}
+			a.nextFar[machine] = run
 			if err := a.openThen(machine, at, then); err != nil {
 				a.failed("Couldn't open a shell on "+a.machines.Name(machine), err.Error())
 				a.problem()
@@ -1988,9 +2038,11 @@ func (a *app) openThen(machine machines.ID, at Placement, then func(id string, e
 	case !ok:
 		return fmt.Errorf("kakel: %s is not connected", a.machines.Name(machine))
 	}
+	profile, _ := a.farProfile(machine, run)
+	cfg := a.farConfig(machine, run, screen.Cols, screen.Rows)
 	a.starting++
 	go func() {
-		sess, err := conn.Shell(a.ctx, a.shellConfig(machine, screen.Cols, screen.Rows))
+		sess, err := conn.Shell(a.ctx, cfg)
 		a.events <- func() {
 			a.starting--
 			if err != nil {
@@ -2000,7 +2052,10 @@ func (a *app) openThen(machine machines.ID, at Placement, then func(id string, e
 				then("", err)
 				return
 			}
-			a.teachFar(machine, sess)
+			a.teachFar(machine, sess, profile.Command)
+			if profile.ID != "" {
+				a.farRuns[id] = profile.ID
+			}
 			a.paneAt[id] = a.machines.Get(machine).Reached
 			// Called after the server, until its shell names the pane.
 			title := a.freeTitle(a.machines.Name(machine))
@@ -2012,8 +2067,9 @@ func (a *app) openThen(machine machines.ID, at Placement, then func(id string, e
 }
 
 // shellKindOf is the kind of shell pane p runs: on this computer, the
-// one it was started with; on a server, its login shell, taken to be
-// POSIX; through another kakel window, unknown.
+// one it was started with; on a server, its profile's, or else its
+// login shell, taken to be POSIX; through another kakel window, or a
+// profile's program the setup is not written for, unknown.
 func (a *app) shellKindOf(p Pane) shellsetup.Route {
 	switch {
 	case p.Machine == "":
@@ -2021,7 +2077,11 @@ func (a *app) shellKindOf(p Pane) shellsetup.Route {
 	case a.machines.Get(p.Machine).Window != nil:
 		return shellsetup.NoRoute
 	}
-	return shellsetup.Posix
+	profile, ok := a.farProfile(p.Machine, a.farRuns[p.ID])
+	if ok && !shellsetup.Knows(profile.Command) {
+		return shellsetup.NoRoute
+	}
+	return shellsetup.RouteFor(profile.Command)
 }
 
 // addPane shows a new pane, with the keyboard: beside at.beside while
@@ -2146,7 +2206,9 @@ func (a *app) split(in SplitPane) error {
 	if in.Elsewhere {
 		machine = in.Machine
 	}
-	if in.Shell != "" {
+	if p, ok := a.serverProfile(in.Shell); ok {
+		machine = a.runNextOn(p)
+	} else if in.Shell != "" {
 		argv := a.shellCommand(in.Shell)
 		if argv == nil {
 			return fmt.Errorf("this machine has no shell called %q", in.Shell)
@@ -2319,6 +2381,7 @@ func (a *app) remove(id string) {
 	a.tunnelPaneGone(id)
 	delete(a.commands, id)
 	delete(a.argvs, id)
+	delete(a.farRuns, id)
 	delete(a.noticed, id)
 	delete(a.paneAt, id)
 	delete(a.farHost, id)

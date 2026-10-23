@@ -72,15 +72,23 @@ func (c *chooser) refresh(u *gunim.UI) {
 	}
 	here := c.w.filesKeyOf(c.id)
 	reach := c.w.machines()
+	// A saved server's profiles, after its terminal.
+	profiles := func(m machines.ID, name string) {
+		for _, p := range c.w.profilesOn(m) {
+			add(p.Name+" on "+name, app.SplitPane{Instead: c.id, Shell: p.ID})
+		}
+	}
 	for _, m := range reach {
 		if m != here {
 			add("Terminal on "+c.w.nameOf(m), app.SplitPane{Instead: c.id, Machine: m, Elsewhere: true})
 		}
+		profiles(m, c.w.nameOf(m))
 	}
 	// The saved servers not connected to, which cost a sign-in first.
 	for _, h := range c.w.saved {
 		if !h.Window && !slices.Contains(reach, machines.ID(h.ID)) {
 			add("Terminal on "+h.Name, app.SplitPane{Instead: c.id, Machine: machines.ID(h.ID), Elsewhere: true})
+			profiles(machines.ID(h.ID), h.Name)
 		}
 	}
 	offers = append(offers, offer{key: "new:command", label: "Command…", local: func(u *gunim.UI) {
