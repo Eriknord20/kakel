@@ -36,7 +36,6 @@ func TestAProfileIsCheckedBeforeItIsSaved(t *testing.T) {
 		{"no name", "", "  ", "bash", "", "", "enter a name"},
 		{"another's name", "", "git bash", "bash", "", "", "name already used"},
 		{"no command", "", "Bash", "  ", "", "", "enter a command line"},
-		{"an unclosed quote", "", "Bash", `"bash -l`, "", "", "unclosed quote"},
 		{"no such program", "", "Nu", "nu -l", "", "", "nu not found"},
 		{"no such folder", "", "Bash", "bash -l", filepath.Join(folder, "nowhere"), "", "there is no folder " + filepath.Join(folder, "nowhere")},
 		{"a variable with no value", "", "Bash", "bash -l", "", "FOO=bar\nBAZ", "invalid environment line 2"},

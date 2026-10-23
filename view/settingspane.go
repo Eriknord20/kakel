@@ -423,7 +423,7 @@ func (p *settingsPane) terminal() gunim.Node {
 			settingRow("Start in", "New terminals start here, unless kakel was started in a folder of its own, or they open from a terminal in another.", p.startIn.node),
 			settingRow("Shell", "What a new terminal here runs.", p.shell)),
 		settingsSection("Profiles",
-			faintLabel("Shells you add, here or on a saved server, such as Git Bash, MSYS2 or tmux, offered with the ones kakel finds. A profile has its own folder and variables."),
+			faintLabel("Shells you add, here or on a saved server, such as MSYS2, nushell or tmux, offered with the ones kakel finds. A profile has its own folder and variables."),
 			p.profiles,
 			buttons(addP, p.editP, p.removeP)),
 		settingsSection("Terminal identity",

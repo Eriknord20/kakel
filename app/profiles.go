@@ -15,7 +15,7 @@ import (
 	shellfind "github.com/marrasen/kakel/shells"
 )
 
-// Profiles: shells the user describes, such as Git Bash, MSYS2 or ssh
+// Profiles: shells the user describes, such as MSYS2, nushell or ssh
 // to a box, by a command line, a folder and variables. Each joins the
 // shells found here, so the palette, the split chooser, the launcher,
 // the tray and the Shell setting offer it with the rest.
@@ -36,6 +36,10 @@ type (
 // lookPath finds a profile's program. A variable, so a test can
 // describe a machine.
 var lookPath = exec.LookPath
+
+// ProfileLine is a profile's command as its dialog shows it, which
+// ParseProfile reads back as the same words.
+func ProfileLine(p settings.Profile) string { return joinLine(p.Command) }
 
 // ParseProfile is the profile a dialog describes, or why it cannot be
 // saved. have are the profiles there are, and id is the profile's own,
@@ -60,10 +64,7 @@ func ParseProfile(have []settings.Profile, id, hostID, name, line, folder, env s
 			return p, errors.New("name already used")
 		}
 	}
-	argv, err := shellfind.SplitCommandLine(line)
-	if err != nil {
-		return p, err
-	}
+	argv := splitLine(line)
 	if len(argv) == 0 || argv[0] == "" {
 		return p, errors.New("enter a command line")
 	}
@@ -84,9 +85,11 @@ func ParseProfile(have []settings.Profile, id, hostID, name, line, folder, env s
 	if folder = strings.TrimSpace(folder); folder != "" {
 		switch {
 		case hostID == "":
-			if p.Folder, err = FolderHere(folder); err != nil {
+			full, err := FolderHere(folder)
+			if err != nil {
 				return p, err
 			}
+			p.Folder = full
 		case folder == "~" || strings.HasPrefix(folder, "~/") || strings.HasPrefix(folder, "/"):
 			p.Folder = folder
 		default:

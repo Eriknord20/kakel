@@ -12,7 +12,6 @@ import (
 	"github.com/marrasen/kakel/machines"
 	"github.com/marrasen/kakel/remote"
 	"github.com/marrasen/kakel/settings"
-	shellfind "github.com/marrasen/kakel/shells"
 	"github.com/marrasen/kakel/words"
 )
 
@@ -40,7 +39,7 @@ func (w *Window) profileDialog(have []settings.Profile, old *settings.Profile, u
 	machine.Label = "Machine"
 	hostID := func() string { return hosts[max(0, min(machine.Selected(), len(hosts)-1))] }
 	placeholders := func() {
-		line.Placeholder, dir.Placeholder = `such as "C:\Program Files\Git\bin\bash.exe" -i -l`, "Optional"
+		line.Placeholder, dir.Placeholder = `such as C:\msys64\usr\bin\bash.exe --login -i`, "Optional"
 		if hostID() != "" {
 			line.Placeholder = "such as tmux new -A -s main"
 		}
@@ -52,7 +51,7 @@ func (w *Window) profileDialog(have []settings.Profile, old *settings.Profile, u
 		machine.SetSelected(slices.Index(hosts, old.HostID), nil)
 		machine.Disabled = true
 		name.SetText(old.Name, nil)
-		line.SetText(shellfind.JoinCommandLine(old.Command), nil)
+		line.SetText(app.ProfileLine(*old), nil)
 		dir.SetText(old.Folder, nil)
 		env.SetText(strings.Join(old.Env, "\n"), nil)
 	}
@@ -113,7 +112,7 @@ func (w *Window) profilesOn(m machines.ID) []settings.Profile {
 func (w *Window) profileItems(have []settings.Profile) []widget.PaletteItem {
 	items := make([]widget.PaletteItem, len(have))
 	for i, p := range have {
-		items[i] = widget.PaletteItem{Title: p.Name, Detail: w.profileOn(p), Hint: shellfind.JoinCommandLine(p.Command), Icon: icon.SquareTerminal}
+		items[i] = widget.PaletteItem{Title: p.Name, Detail: w.profileOn(p), Hint: app.ProfileLine(p), Icon: icon.SquareTerminal}
 	}
 	return items
 }
@@ -150,7 +149,7 @@ func (w *Window) profilesSays(have []settings.Profile) string {
 		if on := w.profileOn(p); on != "" {
 			lines[i] += on + "  ·  "
 		}
-		lines[i] += shellfind.JoinCommandLine(p.Command)
+		lines[i] += app.ProfileLine(p)
 	}
 	return strings.Join(lines, "\n")
 }

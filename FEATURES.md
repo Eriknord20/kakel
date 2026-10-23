@@ -13,8 +13,8 @@ The whole list. The [README](README.md) has the short version.
   implementations. Nothing above it — the emulator, the grid, the
   window — can tell the difference.
 - **Profiles for the shells kakel does not find.** Settings › Terminal ›
-  Profiles adds Git Bash, MSYS2, nushell or `ssh host` by its command
-  line, as Windows Terminal does: `"C:\Program Files\Git\bin\bash.exe" -i -l`.
+  Profiles adds MSYS2, nushell or `ssh host` by its command line, as
+  Windows Terminal does: `C:\msys64\usr\bin\bash.exe --login -i`.
   A profile may name a folder to start in and variables to set, one
   `NAME=value` a line. It is offered with the shells found here, in the
   palette, the split chooser, the launcher, the tray and the Shell
