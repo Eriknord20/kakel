@@ -9,6 +9,17 @@ change how something behaves.
 
 ## Unreleased
 
+## v0.12.2-beta.2
+
+### Fixed
+
+**Commands with spaces in their path run.** Run Command split the line
+at every space, even inside quotes, so a command such as
+`"C:\Program Files\Git\git-bash.exe"` could not start. Double quotes
+now keep a word whole, and so do single quotes at the start of a word.
+Saved commands, pane titles and commands run through another kakel
+window keep the quotes too.
+
 ## v0.12.2-beta.1
 
 ### Changed
