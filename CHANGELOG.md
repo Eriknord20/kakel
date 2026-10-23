@@ -20,6 +20,11 @@ now keep a word whole, and so do single quotes at the start of a word.
 Saved commands, pane titles and commands run through another kakel
 window keep the quotes too.
 
+**A SOCKS tunnel's refusal reaches the program on Windows.** When a
+dynamic tunnel turned down a request, such as one with a bad host name,
+Windows could reset the connection before the program read why. kakel
+now reads the rest of the request before it closes the connection.
+
 ## v0.12.2-beta.1
 
 ### Changed

@@ -205,6 +205,26 @@ func socksAnswer(c net.Conn, code byte) error {
 	return nil
 }
 
+// socksLingerFor is how long a refused client is given to stop sending.
+const socksLingerFor = time.Second
+
+// socksLinger lets a refused request end before its connection is
+// closed. A refusal can come with some of the request still unread, as
+// the port after a name that is not one. Closed with bytes unread, a
+// socket is reset rather than ended on Windows, and the reset can throw
+// away the answer before the client has read it. So the sending side is
+// closed first, and what the client still sends is read and dropped,
+// for socksLingerFor at most.
+func socksLinger(c net.Conn) {
+	if tcp, ok := c.(*net.TCPConn); ok {
+		_ = tcp.CloseWrite()
+	}
+	if err := c.SetReadDeadline(time.Now().Add(socksLingerFor)); err != nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(c, 64<<10))
+}
+
 // socksCode turns a failure to reach the far end into the nearest thing
 // SOCKS5 can say about it.
 func socksCode(err error) byte {
