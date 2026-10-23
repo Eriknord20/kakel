@@ -552,14 +552,14 @@ func (a *app) openThrough(window machines.ID, key string, cmd command, id, title
 			// A terminal on its own machine, as every build can open.
 			sess, err = w.Serve.Open(screen.Cols, screen.Rows, named)
 		} else {
-			sess, err = w.Serve.OpenOn(key, strings.Join(cmd.argv, " "), cmd.dir, screen.Cols, screen.Rows, named)
+			sess, err = w.Serve.OpenOn(key, joinLine(cmd.argv), cmd.dir, screen.Cols, screen.Rows, named)
 		}
 		a.events <- func() {
 			a.starting--
 			if err != nil {
 				what := "Couldn't open a shell on "
 				if len(cmd.argv) > 0 {
-					what = "Couldn't run " + strings.Join(cmd.argv, " ") + " on "
+					what = "Couldn't run " + joinLine(cmd.argv) + " on "
 				}
 				a.failed(what+a.machines.Name(on), err.Error())
 				a.stayIfEmpty()
