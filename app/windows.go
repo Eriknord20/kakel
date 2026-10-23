@@ -458,6 +458,14 @@ func (a *app) disconnectWindow(name machines.ID) error {
 	}
 	// Let go of on purpose: nothing to offer to reconnect.
 	w.Leaving = true
+	// The servers reached through it are let go of with it. Said now:
+	// each can see its connection end before the window's own end is
+	// heard of, and would be taken as dropped.
+	a.machines.Each(func(_ machines.ID, m *machines.Machine) {
+		if m.Conn != nil && m.Behind == name {
+			m.LetGo = true
+		}
+	})
 	err := w.Serve.Close()
 	if serve.Ended(err) {
 		err = nil

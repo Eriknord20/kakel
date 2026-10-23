@@ -25,6 +25,12 @@ dynamic tunnel turned down a request, such as one with a bad host name,
 Windows could reset the connection before the program read why. kakel
 now reads the rest of the request before it closes the connection.
 
+**Servers behind a window you let go of are not marked as lost.** A
+server reached through another kakel window went with it when you
+disconnected that window. Sometimes it was marked as dropped, with a
+greyed row and a "Disconnected" notice, as if its connection had
+failed. It is now let go of with the window every time.
+
 ## v0.12.2-beta.1
 
 ### Changed
