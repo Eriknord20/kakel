@@ -9,6 +9,8 @@ change how something behaves.
 
 ## Unreleased
 
+## v0.12.2-beta.3
+
 ### Added
 
 **Git Bash runs in a pane.** When Git for Windows is installed, Git
