@@ -11,7 +11,6 @@ import (
 
 	"github.com/marrasen/kakel/jobs"
 	"github.com/marrasen/kakel/pasted"
-	shellfind "github.com/marrasen/kakel/shells"
 	"github.com/marrasen/kakel/vfs"
 )
 
@@ -70,13 +69,9 @@ func (a *app) droppedInto(id string) (string, bool) {
 		// The machine at the far end names its own paths.
 		return dir, true
 	}
-	if distro := a.distroOf(id); distro != "" {
-		// A pane in WSL says a path inside the distribution, which this
-		// machine reaches on a share of its own.
-		at := shellfind.WindowsPath(distro, dir)
-		return at, at != ""
-	}
-	return dir, true
+	// WSL and Git Bash name a folder their own way
+	at := a.shellOf(id).LocalPath(dir)
+	return at, at != ""
 }
 
 // copyDropped copies dropped files into the folder the shell in a pane

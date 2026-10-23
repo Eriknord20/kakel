@@ -9,6 +9,15 @@ change how something behaves.
 
 ## Unreleased
 
+### Added
+
+**Git Bash runs in a pane.** When Git for Windows is installed, Git
+Bash is one of the shells under New Terminals, next to PowerShell and
+the WSL distributions. Before, the way to run it was `git-bash.exe`,
+which opens a window of its own. A Git Bash pane says which folder it
+is in, so a new terminal from it starts there, and a file dropped on it
+lands in that folder.
+
 ## v0.12.2-beta.2
 
 ### Fixed

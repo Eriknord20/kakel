@@ -19,6 +19,12 @@ const comspecCmd = `D:\Windows\System32\cmd.exe`
 // systemDir is the directory the fake PATH finds programs in.
 const systemDir = `C:\Windows\System32\`
 
+// gitDir is where the fake machine has Git for Windows, and gitBash its bash.
+const (
+	gitDir  = `C:\Program Files\Git`
+	gitBash = gitDir + `\bin\bash.exe`
+)
+
 // windowsMachine is a Windows machine with everything installed, which a test then takes things away
 // from by naming the programs that are not there. Naming COMSPEC unsets it, and naming comspecCmd
 // leaves it set to a file that has gone.
@@ -45,6 +51,16 @@ func windowsMachine(t *testing.T, distros []string, distroErr error, missing ...
 				if !gone(file) {
 					return systemDir + file, nil
 				}
+			case "git.exe":
+				if !gone(file) {
+					return gitDir + `\cmd\git.exe`, nil
+				}
+			case gitBash:
+				if !gone(file) {
+					return gitBash, nil
+				}
+			case gitDir + `\git-bash.exe`:
+				return file, nil
 			}
 			return "", exec.ErrNotFound
 		},
@@ -86,7 +102,7 @@ func ids(list []Shell) []string {
 	return got
 }
 
-// A Windows machine offers cmd, both PowerShells, and one line per distribution.
+// A Windows machine offers cmd, both PowerShells, Git Bash, and one line per distribution.
 func TestAWindowsMachineOffersEveryShellItHas(t *testing.T) {
 	got, err := find(windowsMachine(t, []string{"Ubuntu", "Debian"}, nil))
 	if err != nil {
@@ -97,6 +113,7 @@ func TestAWindowsMachineOffersEveryShellItHas(t *testing.T) {
 		{ID: "cmd", Title: "Command Prompt", Path: comspecCmd},
 		{ID: "powershell", Title: "Windows PowerShell", Path: systemDir + "powershell.exe"},
 		{ID: "pwsh", Title: "PowerShell", Path: systemDir + "pwsh.exe"},
+		{ID: "gitbash", Title: "Git Bash", Path: gitBash, Args: []string{"--login", "-i"}, MSYS: true},
 		{ID: "wsl:Ubuntu", Title: "Ubuntu (WSL)", Path: systemDir + "wsl.exe",
 			Args: []string{"-d", "Ubuntu"}, Distro: "Ubuntu"},
 		{ID: "wsl:Debian", Title: "Debian (WSL)", Path: systemDir + "wsl.exe",
@@ -113,8 +130,9 @@ func TestAShellThatIsNotInstalledIsNotOffered(t *testing.T) {
 		missing string
 		want    []string
 	}{
-		{"powershell.exe", []string{"cmd", "pwsh"}},
-		{"pwsh.exe", []string{"cmd", "powershell"}},
+		{"powershell.exe", []string{"cmd", "pwsh", "gitbash"}},
+		{"pwsh.exe", []string{"cmd", "powershell", "gitbash"}},
+		{gitBash, []string{"cmd", "powershell", "pwsh"}},
 	} {
 		list, err := find(windowsMachine(t, nil, nil, c.missing))
 		if err != nil {
@@ -164,7 +182,7 @@ func TestWithNoCmdAnywhereItIsNotOffered(t *testing.T) {
 		if err != nil {
 			t.Fatalf("when %s, finding the shells: %v", c.what, err)
 		}
-		if got, want := ids(list), []string{"powershell", "pwsh"}; !reflect.DeepEqual(got, want) {
+		if got, want := ids(list), []string{"powershell", "pwsh", "gitbash"}; !reflect.DeepEqual(got, want) {
 			t.Errorf("when %s the machine offers %v, want %v", c.what, got, want)
 		}
 	}
@@ -174,7 +192,7 @@ func TestWithNoCmdAnywhereItIsNotOffered(t *testing.T) {
 // error: a machine with no WSL at all is an answer.
 func TestWslNotAnsweringLeavesTheRestOfTheList(t *testing.T) {
 	broken := errors.New("exit status 1")
-	want := []string{"cmd", "powershell", "pwsh"}
+	want := []string{"cmd", "powershell", "pwsh", "gitbash"}
 
 	for _, c := range []struct {
 		what    string
@@ -205,7 +223,7 @@ func TestWslExitingNonZeroIsAnAnswer(t *testing.T) {
 	if err != nil {
 		t.Errorf("wsl.exe exiting non-zero was reported as %v", err)
 	}
-	if want := []string{"cmd", "powershell", "pwsh"}; !reflect.DeepEqual(ids(got), want) {
+	if want := []string{"cmd", "powershell", "pwsh", "gitbash"}; !reflect.DeepEqual(ids(got), want) {
 		t.Errorf("the machine offers %v, want %v", ids(got), want)
 	}
 }

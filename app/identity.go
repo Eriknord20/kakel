@@ -140,13 +140,14 @@ func shortHost(host string) string {
 // localDir is a folder a pane says it is in, as this computer names
 // it, or "" when it names none here. A WSL shell says a Linux path, and
 // under the computer's own name, since WSL shares it: /mnt/d/src is
-// D:\src, and its own files are on \\wsl.localhost. A folder that is
-// not here, as a path from another system, gives "", so a new shell
-// starts where it would have rather than failing to start.
+// D:\src, and its own files are on \\wsl.localhost. Git Bash says /d/src
+// for D:\src. A folder that is not here, as a path from another system,
+// gives "", so a new shell starts where it would have rather than
+// failing to start.
 func (a *app) localDir(pane, dir string) string {
 	if pathSep == `\` && strings.HasPrefix(dir, "/") {
-		if distro := a.distroOf(pane); distro != "" {
-			dir = shellfind.WindowsPath(distro, dir)
+		if sh := a.shellOf(pane); sh.OwnPaths() {
+			dir = sh.LocalPath(dir)
 		} else {
 			dir = shellfind.DrivePath(dir)
 		}
