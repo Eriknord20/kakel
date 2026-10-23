@@ -187,24 +187,17 @@ func (a *app) localArgv(id string) []string {
 }
 
 // pathForPane is the path the program in a local pane opens a file of
-// this machine's at: inside WSL, this machine's drives are under /mnt.
+// this machine's at: inside WSL, this machine's drives are under /mnt,
+// and in Git Bash they are /c and the rest.
 func (a *app) pathForPane(id, path string) string {
-	if a.distroOf(id) != "" {
-		if unix := shellfind.UnixPath(path); unix != "" {
-			return unix
-		}
-	}
-	return path
+	return a.shellOf(id).PanePath(path)
 }
 
-// distroOf is the WSL distribution a local pane runs, and empty for a
-// pane running anything else.
-func (a *app) distroOf(id string) string {
-	sh, ok := shellfind.Running(a.found, a.localArgv(id))
-	if !ok {
-		return ""
-	}
-	return sh.Distro
+// shellOf is the shell a local pane runs, and the zero Shell for a pane
+// running anything else.
+func (a *app) shellOf(id string) shellfind.Shell {
+	sh, _ := shellfind.Running(a.found, a.localArgv(id))
+	return sh
 }
 
 // noTextToPaste says why a middle click pasted nothing, when there is

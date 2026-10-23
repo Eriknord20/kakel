@@ -1,5 +1,5 @@
 // Package shells finds which shells a pane on this machine can run, and translates a Windows
-// directory for WSL.
+// directory for WSL and Git Bash.
 //
 // A shell is offered only when it was found, never because the platform usually has it. Listing the
 // WSL distributions can fail on its own, and Find says why rather than leave them quietly out.
@@ -37,6 +37,9 @@ type Shell struct {
 
 	// Distro is the WSL distribution this runs, empty for the rest.
 	Distro string
+
+	// MSYS is set for Git Bash, which names a folder on a drive as /c/Users rather than C:\Users.
+	MSYS bool
 }
 
 // windowsShells are the shells that come with Windows, in the order a menu offers them.
@@ -47,6 +50,13 @@ var windowsShells = []struct {
 	{"powershell", "Windows PowerShell", "powershell.exe"},
 	{"pwsh", "PowerShell", "pwsh.exe"},
 }
+
+// gitBashID is the id of Git Bash.
+const gitBashID = "gitbash"
+
+// gitTails are where git.exe sits inside a Git for Windows install, so its path gives the install's.
+var gitTails = []string{`\cmd\git.exe`, `\mingw64\bin\git.exe`, `\mingw32\bin\git.exe`, `\clangarm64\bin\git.exe`,
+	`\bin\git.exe`}
 
 // probe is where the lookup gets its answers, so a test can describe a machine rather than depend on
 // the one it runs on.
@@ -95,6 +105,9 @@ func find(p probe) ([]Shell, error) {
 			list = append(list, s)
 		}
 	}
+	if s, ok := p.gitBash(); ok {
+		list = append(list, s)
+	}
 
 	// One line per installed distribution, in the order wsl.exe lists them.
 	names, err := p.distros()
@@ -131,6 +144,9 @@ func named(p probe, id string) (Shell, bool) {
 	}
 	if distro, ok := strings.CutPrefix(id, wslPrefix); ok {
 		return p.wsl(distro)
+	}
+	if id == gitBashID {
+		return p.gitBash()
 	}
 	return p.windows(id)
 }
@@ -187,6 +203,40 @@ func (p probe) windows(id string) (Shell, bool) {
 			prog = found
 		}
 		return Shell{ID: w.id, Title: w.title, Path: prog}, true
+	}
+	return Shell{}, false
+}
+
+// gitBash returns Git Bash, and whether Git for Windows is installed. The install whose git.exe is on
+// the PATH comes first, then the ones in Program Files, then the ones for this user alone. A folder
+// counts only with git-bash.exe in it, which Cygwin and MSYS2 do not have.
+func (p probe) gitBash() (Shell, bool) {
+	var roots []string
+	if git, err := p.lookPath("git.exe"); err == nil {
+		for _, tail := range gitTails {
+			if len(git) > len(tail) && strings.EqualFold(git[len(git)-len(tail):], tail) {
+				roots = append(roots, git[:len(git)-len(tail)])
+				break
+			}
+		}
+	}
+	for _, at := range []struct{ env, tail string }{
+		{"ProgramFiles", `\Git`},
+		{"ProgramFiles(x86)", `\Git`},
+		{"LOCALAPPDATA", `\Programs\Git`},
+		{"USERPROFILE", `\scoop\apps\git\current`},
+	} {
+		if dir := p.getenv(at.env); dir != "" {
+			roots = append(roots, dir+at.tail)
+		}
+	}
+	for _, root := range roots {
+		if _, err := p.lookPath(root + `\git-bash.exe`); err != nil {
+			continue
+		}
+		if found, err := p.lookPath(root + `\bin\bash.exe`); err == nil {
+			return Shell{ID: gitBashID, Title: "Git Bash", Path: found, Args: []string{"--login", "-i"}, MSYS: true}, true
+		}
 	}
 	return Shell{}, false
 }
