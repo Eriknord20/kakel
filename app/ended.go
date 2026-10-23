@@ -6,7 +6,6 @@ import (
 	"log"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/marrasen/kakel/grid"
 	"github.com/marrasen/kakel/machines"
@@ -181,7 +180,7 @@ func (a *app) startAgainOr(id string, dial bool) error {
 			if sess == nil && err == nil && (key != "" || len(cmd.argv) > 0) {
 				// Opened anew where it ran: the machine beyond, or the
 				// command again.
-				sess, err = w.Serve.OpenOn(key, strings.Join(cmd.argv, " "), cmd.dir, size.Cols, size.Rows, bind)
+				sess, err = w.Serve.OpenOn(key, joinLine(cmd.argv), cmd.dir, size.Cols, size.Rows, bind)
 				if errors.Is(err, serve.ErrCannotOpenOn) {
 					sess, err = nil, nil
 				}
@@ -448,7 +447,7 @@ const commandRoom = 40
 // naming it: how it ended is said rather than assumed. A command cut
 // off did not finish, and saying it had is as wrong as an exit of 0.
 func commandQuestion(argv []string, status int, known, notRun, cutOff bool) string {
-	what := grid.TrimTail(strings.Join(argv, " "), commandRoom)
+	what := grid.TrimTail(joinLine(argv), commandRoom)
 	if what == "" {
 		what = "The command"
 	}

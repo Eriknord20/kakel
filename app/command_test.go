@@ -244,3 +244,34 @@ func TestAKeptShellFoundGoneByTheScanIsSaid(t *testing.T) {
 		t.Fatalf("the notices are %+v", a.st.Notices)
 	}
 }
+
+// A command line keeps spaces inside quotes, as a path under Program
+// Files has, and joins back into a line that splits the same.
+func TestSplitLine(t *testing.T) {
+	for _, c := range []struct {
+		line string
+		want []string
+	}{
+		{`ls -la /tmp`, []string{"ls", "-la", "/tmp"}},
+		{`  top  `, []string{"top"}},
+		{`"C:\Program Files\Git\git-bash.exe"`, []string{`C:\Program Files\Git\git-bash.exe`}},
+		{`"C:\Program Files\Git\git-bash.exe" --cd="C:\My Dir"`, []string{`C:\Program Files\Git\git-bash.exe`, `--cd=C:\My Dir`}},
+		{`echo 'a b' c`, []string{"echo", "a b", "c"}},
+		{`type C:\Users\O'Brien\notes.txt`, []string{"type", `C:\Users\O'Brien\notes.txt`}},
+		{`echo "" x`, []string{"echo", "", "x"}},
+		{`echo "not closed`, []string{"echo", "not closed"}},
+		{`echo '"quoted"'`, []string{"echo", `"quoted"`}},
+		{``, nil},
+	} {
+		got := splitLine(c.line)
+		if !slices.Equal(got, c.want) {
+			t.Errorf("splitLine(%q) = %q, want %q", c.line, got, c.want)
+		}
+		if again := splitLine(joinLine(got)); !slices.Equal(again, got) {
+			t.Errorf("joinLine(%q) = %q, which splits to %q", got, joinLine(got), again)
+		}
+	}
+	if got := joinLine([]string{`C:\Program Files\Git\git-bash.exe`, "-l"}); got != `"C:\Program Files\Git\git-bash.exe" -l` {
+		t.Errorf("joinLine = %q", got)
+	}
+}

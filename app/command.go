@@ -56,7 +56,7 @@ func (a *app) runCommandThen(in RunCommand, then func(id string, err error)) err
 	if then == nil {
 		then = func(string, error) {}
 	}
-	argv := strings.Fields(in.Line)
+	argv := splitLine(in.Line)
 	if len(argv) == 0 {
 		return errors.New("there is no command to run")
 	}
@@ -74,7 +74,7 @@ func (a *app) runCommandThen(in RunCommand, then func(id string, err error)) err
 		a.st.SavedCommands = a.settings.Commands()
 	}
 	if in.Keep && a.settings != nil {
-		saved := settings.SavedCommand{Line: strings.Join(argv, " "), Dir: strings.TrimSpace(in.Dir), Host: a.keptAs(in.Machine), HostID: a.serverID(in.Machine)}
+		saved := settings.SavedCommand{Line: joinLine(argv), Dir: strings.TrimSpace(in.Dir), Host: a.keptAs(in.Machine), HostID: a.serverID(in.Machine)}
 		if err := a.settings.KeepCommand(saved, mostSavedCommands); err != nil {
 			// Not run: asked to be kept, it would be lost once it ended.
 			return fmt.Errorf("couldn't save the command, so it was not run: %w", err)
@@ -88,7 +88,7 @@ func (a *app) runCommandThen(in RunCommand, then func(id string, err error)) err
 	if in.Machine == "" {
 		a.argvs[id] = argv
 	}
-	title := strings.Join(argv, " ")
+	title := joinLine(argv)
 	if a.machines.Get(through).Window != nil {
 		// The window runs it, in a pane of its own, which this one
 		// watches: its own machine's, or one it reaches.
@@ -101,6 +101,61 @@ func (a *app) runCommandThen(in RunCommand, then func(id string, err error)) err
 		},
 		failed: func() { then("", errors.New("could not run "+title)) },
 	})
+}
+
+// splitLine splits a command line into its words at spaces. Double
+// quotes keep spaces in a word, as in "C:\Program Files\x.exe", and
+// so do single quotes that start a word: one inside a word, as in
+// O'Brien, is only a letter. Backslashes are only letters too, so
+// Windows paths need nothing more. A quote not closed runs to the end.
+func splitLine(line string) []string {
+	var words []string
+	var word strings.Builder
+	started := false
+	var quote rune
+	for _, r := range line {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				word.WriteRune(r)
+			}
+		case r == '"' || r == '\'' && !started:
+			quote, started = r, true
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			if started {
+				words = append(words, word.String())
+				word.Reset()
+				started = false
+			}
+		default:
+			word.WriteRune(r)
+			started = true
+		}
+	}
+	if started {
+		words = append(words, word.String())
+	}
+	return words
+}
+
+// joinLine joins words into a line splitLine splits back into them,
+// quoting those with spaces or quotes in them.
+func joinLine(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, w := range argv {
+		switch {
+		case w != "" && !strings.ContainsAny(w, " \t\n\r\"") && !strings.HasPrefix(w, "'"):
+			quoted[i] = w
+		case strings.Contains(w, `"`) && !strings.Contains(w, "'"):
+			quoted[i] = "'" + w + "'"
+		default:
+			// One with both quotes in it cannot be written whole.
+			quoted[i] = `"` + w + `"`
+		}
+	}
+	return strings.Join(quoted, " ")
 }
 
 // commandStart is what is to be done with a command started: then
@@ -125,7 +180,7 @@ func (s commandStart) fail() {
 // on the program's goroutine. A saved server not connected is connected
 // to first.
 func (a *app) startCommand(machine machines.ID, cmd command, s commandStart) error {
-	line := strings.Join(cmd.argv, " ")
+	line := joinLine(cmd.argv)
 	if machine == "" {
 		sess, err := a.startLocalSession(cmd.argv, cmd.dir, screen.Cols, screen.Rows, false)
 		if err != nil {

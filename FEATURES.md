@@ -411,7 +411,7 @@ What each shell is told:
 | Shell | Directory | Command marks |
 |---|---|---|
 | PowerShell, pwsh | OSC 7, wrapping the prompt already there | yes, with PSReadLine |
-| bash, zsh, WSL, a server's login shell | OSC 7 | yes |
+| bash, zsh, WSL, Git Bash, a server's login shell | OSC 7 | yes |
 | Command Prompt | OSC 9;9 | no |
 | A profile running any other program, such as nushell or ssh | none | no |
 

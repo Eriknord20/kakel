@@ -457,6 +457,7 @@ func (f *Forwarder) carry(near net.Conn) {
 		asked, err := socksAsk(near)
 		if err != nil {
 			f.report(fmt.Errorf("remote: %s: %w", f, err))
+			socksLinger(near)
 			f.release(near)
 			_ = near.Close()
 			return
