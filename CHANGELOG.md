@@ -9,6 +9,16 @@ change how something behaves.
 
 ## Unreleased
 
+### Added
+
+**Disk usage reads a whole drive.** Right-click a drive, a user folder
+or a favourite in the Files sidebar and pick Disk usage. Before, Disk
+usage read only the folder showing or a folder inside it, so the root
+of a drive was out of reach. A place on another machine than the
+window's has no Disk usage line. Open a window there to read it. A
+place that cannot be read shows the line dimmed. This comes with gunim
+master 0f26d56.
+
 ## v0.12.2-beta.3
 
 ### Added
