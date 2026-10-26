@@ -9,6 +9,8 @@ change how something behaves.
 
 ## Unreleased
 
+## v0.12.2-beta.4
+
 ### Added
 
 **Disk usage reads a whole drive.** Right-click a drive, a user folder
