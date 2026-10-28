@@ -693,31 +693,32 @@ func (s *Settings) Profiles() []Profile {
 
 // PutProfile puts a profile in place of the one with its id, or after
 // the rest when none has it, and saves.
-func (s *Settings) PutProfile(p Profile) error {
-	return s.putProfiles(func(have []Profile) []Profile {
+//
+// fit, when given, is handed the profiles as the file holds them now,
+// not as this window last read them, and returns p as it is to be kept
+// or why it cannot be. So a profile another kakel added since is seen:
+// a new one's id is chosen among the ids that are free, and a name or
+// command line already taken is refused.
+func (s *Settings) PutProfile(p Profile, fit func(have []Profile) (Profile, error)) error {
+	return s.putProfiles(func(have []Profile) ([]Profile, error) {
+		if fit != nil {
+			var err error
+			if p, err = fit(have); err != nil {
+				return nil, err
+			}
+		}
 		if i := slices.IndexFunc(have, func(at Profile) bool { return at.ID == p.ID }); i >= 0 {
 			have[i] = p
-			return have
+			return have, nil
 		}
-		return append(have, p)
-	})
-}
-
-// AddProfile adds p after the rest, with the id idFor gives it, and
-// saves. idFor is handed the profiles as the file holds them now, not
-// as this window last read them, so a profile another kakel added since
-// keeps its id.
-func (s *Settings) AddProfile(p Profile, idFor func(have []Profile) string) error {
-	return s.putProfiles(func(have []Profile) []Profile {
-		p.ID = idFor(have)
-		return append(have, p)
+		return append(have, p), nil
 	})
 }
 
 // DropProfile takes the profile with id out of the list and saves.
 func (s *Settings) DropProfile(id string) error {
-	return s.putProfiles(func(have []Profile) []Profile {
-		return slices.DeleteFunc(have, func(at Profile) bool { return at.ID == id })
+	return s.putProfiles(func(have []Profile) ([]Profile, error) {
+		return slices.DeleteFunc(have, func(at Profile) bool { return at.ID == id }), nil
 	})
 }
 
@@ -727,21 +728,26 @@ func (s *Settings) DropProfilesOn(hostID string) error {
 	if hostID == "" {
 		return errors.New("settings: no server named")
 	}
-	return s.putProfiles(func(have []Profile) []Profile {
-		return slices.DeleteFunc(have, func(at Profile) bool { return at.HostID == hostID })
+	return s.putProfiles(func(have []Profile) ([]Profile, error) {
+		return slices.DeleteFunc(have, func(at Profile) bool { return at.HostID == hostID }), nil
 	})
 }
 
-// putProfiles rereads the file, edits the list it holds and saves. A
-// server's new terminal no longer runs a profile taken out.
-func (s *Settings) putProfiles(edit func([]Profile) []Profile) error {
+// putProfiles rereads the file, edits the list it holds and saves,
+// unless the edit fails. A server's new terminal no longer runs a
+// profile taken out.
+func (s *Settings) putProfiles(edit func([]Profile) ([]Profile, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.rereadLocked(); err != nil {
 		return fmt.Errorf("%w: %w", ErrUnsaveable, err)
 	}
+	profiles, err := edit(slices.Clone(s.have.Profiles))
+	if err != nil {
+		return err
+	}
 	before := s.have
-	s.have.Profiles = edit(slices.Clone(s.have.Profiles))
+	s.have.Profiles = profiles
 	s.have.ServerShells = maps.Clone(s.have.ServerShells)
 	maps.DeleteFunc(s.have.ServerShells, func(host, id string) bool { return !hasProfile(s.have.Profiles, host, id) })
 	if err := s.saveLocked(); err != nil {

@@ -60,6 +60,10 @@ func RouteFor(argv []string) Route {
 // would take them as its own input, so a profile running one is left
 // alone.
 //
+// A shell handed a command or a script, as by bash -c, cmd /c or
+// pwsh -File, runs that instead of reading its terminal, and the lines
+// would go to the command. So it is not known either.
+//
 // wsl is a shell only when it starts the distribution's login shell. A
 // command it is given, as in wsl -e nu or wsl htop, is the program the
 // lines would reach, so that is the one asked about.
@@ -67,14 +71,82 @@ func Knows(argv []string) bool {
 	if len(argv) == 0 {
 		return false
 	}
+	args := argv[1:]
 	switch strings.TrimSuffix(strings.ToLower(shells.CommandBase(argv[0])), ".exe") {
-	case "bash", "zsh", "sh", "ksh", "dash", "cmd", "powershell", "pwsh":
-		return true
+	case "bash", "zsh", "sh", "ksh", "dash":
+		return !posixScripted(args)
+	case "cmd":
+		return !cmdScripted(args)
+	case "powershell", "pwsh":
+		return !powerShellScripted(args)
 	case "wsl":
-		if run := wslRuns(argv[1:]); len(run) > 0 {
+		if run := wslRuns(args); len(run) > 0 {
 			return Knows(run)
 		}
 		return true
+	}
+	return false
+}
+
+// posixScripted reports whether a POSIX shell's arguments give it
+// something to run: -c, alone or among other letters as in -lc, or a
+// script, the first word that is not an option.
+func posixScripted(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			return i+1 < len(args)
+		case arg == "-o" || arg == "+o" || arg == "-O" || arg == "+O" || arg == "--rcfile" || arg == "--init-file":
+			// Each takes the word after it as its value.
+			i++
+		case strings.HasPrefix(arg, "--") || strings.HasPrefix(arg, "+"):
+		case strings.HasPrefix(arg, "-"):
+			if strings.Contains(arg, "c") {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// cmdScripted reports whether cmd's arguments give it a command to run
+// and end with, /c. A command given with /k leaves the prompt open, and
+// the words after /k are that command, not cmd's own.
+func cmdScripted(args []string) bool {
+	for _, arg := range args {
+		if len(arg) < 2 || arg[0] != '/' {
+			continue
+		}
+		switch arg[1] | 0x20 {
+		case 'c':
+			return true
+		case 'k':
+			return false
+		}
+	}
+	return false
+}
+
+// powerShellScripted reports whether PowerShell's arguments give it a
+// command, a script or an encoded command to run, unless -NoExit before
+// it keeps the prompt open. PowerShell takes a parameter cut short, as
+// -c or -com for -Command, so any such start counts.
+func powerShellScripted(args []string) bool {
+	stays := false
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		name := strings.ToLower(strings.TrimLeft(arg, "-"))
+		switch {
+		case len(name) >= 3 && strings.HasPrefix("noexit", name):
+			stays = true
+		case name == "ec" || name != "" && (strings.HasPrefix("command", name) || strings.HasPrefix("file", name) || strings.HasPrefix("encodedcommand", name)):
+			return !stays
+		}
 	}
 	return false
 }
@@ -90,6 +162,9 @@ func wslRuns(args []string) []string {
 		case "-d", "--distribution", "--distribution-id", "-u", "--user", "--cd", "--shell-type":
 			// Each takes the word after it as its value.
 			i++
+		case "~":
+			// Starts the shell in the home folder, as Windows Terminal's
+			// wsl.exe ~ -d Ubuntu does.
 		default:
 			if !strings.HasPrefix(args[i], "-") {
 				return args[i:]

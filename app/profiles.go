@@ -53,35 +53,21 @@ func ProfileLine(p settings.Profile) string { return joinLine(p.Command) }
 // and its folder is a path from / or from home, ~.
 func ParseProfile(have []settings.Profile, id, hostID, name, line, folder, env string) (settings.Profile, error) {
 	p := settings.Profile{ID: id, HostID: hostID, Name: strings.TrimSpace(name)}
-	others := slices.DeleteFunc(slices.Clone(have), func(other settings.Profile) bool {
-		return other.ID == id || other.HostID != hostID
-	})
 	if p.Name == "" {
 		return p, errors.New("enter a name")
 	}
-	for _, other := range others {
-		if strings.EqualFold(other.Name, p.Name) {
-			return p, errors.New("name already used")
-		}
-	}
-	argv := splitLine(line)
-	if len(argv) == 0 || argv[0] == "" {
+	p.Command = splitLine(line)
+	if len(p.Command) == 0 || p.Command[0] == "" {
 		return p, errors.New("enter a command line")
 	}
 	if hostID == "" {
-		if _, err := lookPath(argv[0]); err != nil {
-			return p, errors.New(argv[0] + " not found")
+		if _, err := lookPath(p.Command[0]); err != nil {
+			return p, errors.New(p.Command[0] + " not found")
 		}
 	}
-	// A pane here knows its profile only by the command it runs, as
-	// profileOf reads it, so two profiles running one command would both
-	// start as the first. A server's pane keeps its profile by id.
-	for _, other := range others {
-		if hostID == "" && slices.EqualFunc(withoutFolder(other.Command), withoutFolder(argv), strings.EqualFold) {
-			return p, errors.New("command line already used")
-		}
+	if err := taken(have, p); err != nil {
+		return p, err
 	}
-	p.Command = argv
 	if folder = strings.TrimSpace(folder); folder != "" {
 		switch {
 		case hostID == "":
@@ -109,6 +95,25 @@ func ParseProfile(have []settings.Profile, id, hostID, name, line, folder, env s
 		p.Env = append(p.Env, key+"="+value)
 	}
 	return p, nil
+}
+
+// taken is why p cannot be kept beside the profiles in have, nil when
+// it can: another profile on its machine has its name, or here runs
+// its command line. A pane here knows its profile only by the command
+// it runs, as profileOf reads it, so two profiles running one command
+// would both start as the first. A server's pane keeps its profile by
+// id.
+func taken(have []settings.Profile, p settings.Profile) error {
+	for _, other := range have {
+		switch {
+		case other.ID == p.ID || other.HostID != p.HostID:
+		case strings.EqualFold(other.Name, p.Name):
+			return errors.New("name already used")
+		case p.HostID == "" && len(p.Command) > 0 && slices.EqualFunc(withoutFolder(other.Command), withoutFolder(p.Command), strings.EqualFold):
+			return errors.New("command line already used")
+		}
+	}
+	return nil
 }
 
 // profileID is the ID a new profile called name is given: its name in
@@ -148,12 +153,17 @@ func (a *app) saveProfile(p settings.Profile) error {
 	if a.settings == nil {
 		return errors.New("the settings could not be read, so nothing can be kept")
 	}
-	var err error
-	if p.ID == "" {
-		err = a.settings.AddProfile(p, func(have []settings.Profile) string { return profileID(p.Name, have) })
-	} else {
-		err = a.settings.PutProfile(p)
-	}
+	// The dialog checked p against the profiles this window last read,
+	// and another kakel may have saved one since.
+	err := a.settings.PutProfile(p, func(have []settings.Profile) (settings.Profile, error) {
+		if err := taken(have, p); err != nil {
+			return p, err
+		}
+		if p.ID == "" {
+			p.ID = profileID(p.Name, have)
+		}
+		return p, nil
+	})
 	if err != nil {
 		return err
 	}

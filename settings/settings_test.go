@@ -1194,10 +1194,11 @@ func TestTheRelayIsRemembered(t *testing.T) {
 	}
 }
 
-// A new profile's id is chosen from the profiles the file holds as it
-// is saved, so two kakels that each add one under the same name keep
-// both, rather than the second writing over the first.
-func TestAProfileAddedElsewhereKeepsItsID(t *testing.T) {
+// A profile is fitted to the profiles the file holds as it is saved,
+// not to the ones this window last read. So two kakels that each add
+// one under the same name keep both, rather than the second writing
+// over the first, and a save the fit refuses leaves the file alone.
+func TestAProfileIsFittedToTheFileAsItIsSaved(t *testing.T) {
 	path := at(t)
 	here, err := Load(path)
 	if err != nil {
@@ -1207,18 +1208,24 @@ func TestAProfileAddedElsewhereKeepsItsID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idFor := func(have []Profile) string {
-		id := "profile:msys2"
-		for n := 2; slices.ContainsFunc(have, func(p Profile) bool { return p.ID == id }); n++ {
-			id = "profile:msys2-" + strconv.Itoa(n)
+	fresh := func(have []Profile) (Profile, error) {
+		p := Profile{Name: "MSYS2", Command: []string{"bash"}, ID: "profile:msys2"}
+		for n := 2; slices.ContainsFunc(have, func(at Profile) bool { return at.ID == p.ID }); n++ {
+			p.ID = "profile:msys2-" + strconv.Itoa(n)
 		}
-		return id
+		return p, nil
 	}
-	if err := there.AddProfile(Profile{Name: "MSYS2", Command: []string{"bash"}}, idFor); err != nil {
+	if err := there.PutProfile(Profile{}, fresh); err != nil {
 		t.Fatal(err)
 	}
-	if err := here.AddProfile(Profile{Name: "MSYS2", Command: []string{"zsh"}}, idFor); err != nil {
+	if err := here.PutProfile(Profile{}, fresh); err != nil {
 		t.Fatal(err)
+	}
+	refused := errors.New("command line already used")
+	if err := here.PutProfile(Profile{ID: "profile:zsh", Name: "Zsh", Command: []string{"zsh"}}, func([]Profile) (Profile, error) {
+		return Profile{}, refused
+	}); !errors.Is(err, refused) {
+		t.Fatalf("a refused profile was saved, %v", err)
 	}
 	again, err := Load(path)
 	if err != nil {
@@ -1226,10 +1233,10 @@ func TestAProfileAddedElsewhereKeepsItsID(t *testing.T) {
 	}
 	var got []string
 	for _, p := range again.Profiles() {
-		got = append(got, p.ID+" "+p.Command[0])
+		got = append(got, p.ID)
 	}
-	if want := []string{"profile:msys2 bash", "profile:msys2-2 zsh"}; !slices.Equal(got, want) {
-		t.Fatalf("both added, the file holds %q, want %q", got, want)
+	if want := []string{"profile:msys2", "profile:msys2-2"}; !slices.Equal(got, want) {
+		t.Fatalf("the file holds %q, want %q", got, want)
 	}
 }
 
@@ -1244,12 +1251,12 @@ func TestProfilesAreAddedEditedAndRemoved(t *testing.T) {
 	bash := Profile{ID: "profile:git-bash", Name: "Git Bash", Command: []string{`C:\Program Files\Git\bin\bash.exe`, "-i", "-l"}}
 	nu := Profile{ID: "profile:nu", Name: "Nushell", Command: []string{"nu"}, Env: []string{"FOO=bar"}}
 	for _, p := range []Profile{bash, nu} {
-		if err := set.PutProfile(p); err != nil {
+		if err := set.PutProfile(p, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
 	bash.Name, bash.Folder = "Bash", `C:\src`
-	if err := set.PutProfile(bash); err != nil {
+	if err := set.PutProfile(bash, nil); err != nil {
 		t.Fatal(err)
 	}
 	again, err := Load(path)
@@ -1304,7 +1311,7 @@ func TestAProfileThatCannotBeOpenedIsRefused(t *testing.T) {
 		}
 		set := settingsAt(t)
 		for _, p := range c.put {
-			if err := set.PutProfile(p); err == nil {
+			if err := set.PutProfile(p, nil); err == nil {
 				t.Errorf("a profile with %s was saved", c.what)
 			}
 		}
@@ -1322,7 +1329,7 @@ func TestSavingAProfileKeepsASettingFromANewerKakel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := set.PutProfile(Profile{ID: "profile:nu", Name: "Nushell", Command: []string{"nu"}}); err != nil {
+	if err := set.PutProfile(Profile{ID: "profile:nu", Name: "Nushell", Command: []string{"nu"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(path)
@@ -1348,7 +1355,7 @@ func TestAServersShellIsOneOfItsProfiles(t *testing.T) {
 		{ID: "profile:htop", Name: "htop", HostID: "srv", Command: []string{"htop"}},
 		{ID: "profile:nu", Name: "Nushell", Command: []string{"nu"}},
 	} {
-		if err := set.PutProfile(p); err != nil {
+		if err := set.PutProfile(p, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

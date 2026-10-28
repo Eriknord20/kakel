@@ -67,12 +67,5 @@ func PathFlag(value string) string {
 // windowsPath reports whether s starts as an absolute Windows path
 // does: a drive, as C:\ or C:/, or a share, as \\server.
 func windowsPath(s string) bool {
-	if strings.HasPrefix(s, `\\`) {
-		return true
-	}
-	if len(s) < 3 || s[1] != ':' || (s[2] != '\\' && s[2] != '/') {
-		return false
-	}
-	drive := s[0] | 0x20
-	return drive >= 'a' && drive <= 'z'
+	return strings.HasPrefix(s, `\\`) || UnixPath(s) != ""
 }

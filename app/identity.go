@@ -130,36 +130,90 @@ func paneEnv(argv []string, called string, set []string) []string {
 	return append(env, "WSLENV="+shellfind.CarryIntoWSL(was, carry...))
 }
 
-// expandVars is value with the variables it names filled in, as this
-// system's own shell would: %NAME% on Windows, where a name not set is
-// left as it is written, as cmd leaves it, and $NAME or ${NAME}
-// elsewhere.
+// expandVars is value with the variables it names filled in, written as
+// this system's own shell writes them: %NAME% on Windows, $NAME or
+// ${NAME} elsewhere. A name that is not set stays as it is written, as
+// cmd leaves it, and a doubled sign, %% or $$, is one sign of its own.
 func expandVars(value string) string {
-	if runtime.GOOS != "windows" {
-		return os.ExpandEnv(value)
+	if runtime.GOOS == "windows" {
+		return expandPercent(value)
 	}
+	return expandDollar(value)
+}
+
+// expandPercent fills in each %NAME% in value that is set.
+func expandPercent(value string) string {
 	var out strings.Builder
 	for {
 		start := strings.IndexByte(value, '%')
 		if start < 0 {
 			break
 		}
-		length := strings.IndexByte(value[start+1:], '%')
-		if length < 0 {
-			break
-		}
-		end := start + 1 + length
-		if got, ok := os.LookupEnv(value[start+1 : end]); ok && length > 0 {
-			out.WriteString(value[:start] + got)
-			value = value[end+1:]
+		out.WriteString(value[:start])
+		value = value[start+1:]
+		switch end := strings.IndexByte(value, '%'); {
+		case end == 0:
+			out.WriteByte('%')
+			value = value[1:]
 			continue
+		case end > 0:
+			if got, ok := os.LookupEnv(value[:end]); ok {
+				out.WriteString(got)
+				value = value[end+1:]
+				continue
+			}
 		}
-		// Not a variable: the first % is a letter, and the second may
-		// start one.
-		out.WriteString(value[:end])
-		value = value[end:]
+		// Not a variable: this % is a letter, and the next may start one.
+		out.WriteByte('%')
 	}
 	return out.String() + value
+}
+
+// expandDollar fills in each $NAME and ${NAME} in value that is set.
+func expandDollar(value string) string {
+	var out strings.Builder
+	for {
+		start := strings.IndexByte(value, '$')
+		if start < 0 {
+			break
+		}
+		out.WriteString(value[:start])
+		value = value[start+1:]
+		if strings.HasPrefix(value, "$") {
+			out.WriteByte('$')
+			value = value[1:]
+			continue
+		}
+		name, written := dollarName(value)
+		if got, ok := os.LookupEnv(name); ok && name != "" {
+			out.WriteString(got)
+			value = value[written:]
+			continue
+		}
+		out.WriteByte('$')
+	}
+	return out.String() + value
+}
+
+// dollarName is the name s starts with, after a $, and how many bytes
+// it is written with: NAME, or NAME in braces. It is "" when s starts
+// with neither.
+func dollarName(s string) (string, int) {
+	braced := strings.HasPrefix(s, "{")
+	if braced {
+		s = s[1:]
+	}
+	n := 0
+	for n < len(s) && (s[n] == '_' || 'a' <= s[n] && s[n] <= 'z' || 'A' <= s[n] && s[n] <= 'Z' || n > 0 && '0' <= s[n] && s[n] <= '9') {
+		n++
+	}
+	switch {
+	case !braced:
+		return s[:n], n
+	case n > 0 && n < len(s) && s[n] == '}':
+		return s[:n], n + 2
+	}
+	return "", 0
 }
 
 // dirHere is the folder of the focused pane's shell, when it is on this

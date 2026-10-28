@@ -122,6 +122,42 @@ func TestProfilesFollowTheShellsFoundAndAnEditFindsNoneAgain(t *testing.T) {
 	}
 }
 
+// A profile another kakel saved since this one last read the file is
+// seen as this one saves, so the command line it runs is not taken
+// twice, which would start both profiles' panes as the first.
+func TestASaveSeesTheProfilesAnotherKakelSaved(t *testing.T) {
+	was := lookPath
+	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	t.Cleanup(func() { lookPath = was })
+	a := fontApp(t)
+	path := filepath.Join(t.TempDir(), "settings.json")
+	here, err := settings.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	there, err := settings.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.settings = here
+	if err := there.PutProfile(settings.Profile{ID: "profile:nushell", Name: "Nushell", Command: []string{"nu"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveProfile(settings.Profile{Name: "Nu", Command: []string{"nu"}}); err == nil || err.Error() != "command line already used" {
+		t.Fatalf("a second profile running nu was saved, %v", err)
+	}
+	if err := a.saveProfile(settings.Profile{Name: "Nushell", Command: []string{"nu", "-l"}}); err == nil || err.Error() != "name already used" {
+		t.Fatalf("a second profile called Nushell was saved, %v", err)
+	}
+	again, err := settings.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.Profiles(); len(got) != 1 {
+		t.Fatalf("the file holds %+v, want Nushell alone", got)
+	}
+}
+
 // Removing the profile new terminals start takes them back to the
 // default shell, and says nothing: it was removed on purpose.
 func TestRemovingTheKeptProfileGoesBackToTheDefault(t *testing.T) {
@@ -220,21 +256,27 @@ func TestAProfilesVariablesReachItsShell(t *testing.T) {
 
 // A profile's value may name a variable there already, written as this
 // system's shell writes one, so a profile can add to PATH rather than
-// take its place. On Windows a name not set stays as it is written, as
-// cmd leaves it.
+// take its place. A name not set stays as it is written, as cmd leaves
+// it, and a doubled sign writes one, so any value can be written.
 func TestAProfilesValuesNameTheVariablesThere(t *testing.T) {
 	t.Setenv("KAKEL_TOOLS", `C:\tools`)
 	cases := []struct{ value, want string }{
 		{"$KAKEL_TOOLS:/bin", `C:\tools:/bin`},
 		{"${KAKEL_TOOLS}x", `C:\toolsx`},
 		{"plain", "plain"},
+		{"pa$$word", "pa$word"},
+		{"$$KAKEL_TOOLS", "$KAKEL_TOOLS"},
+		{"$KAKEL_NOT_SET and ${KAKEL_NOT_SET}", "$KAKEL_NOT_SET and ${KAKEL_NOT_SET}"},
+		{"cost: 5$, $1, ${}, ${KAKEL_TOOLS", "cost: 5$, $1, ${}, ${KAKEL_TOOLS"},
 	}
 	if runtime.GOOS == "windows" {
 		cases = []struct{ value, want string }{
 			{`D:\bin;%KAKEL_TOOLS%`, `D:\bin;C:\tools`},
 			{"%kakel_tools%", `C:\tools`},
 			{"%KAKEL_NOT_SET%;%KAKEL_TOOLS%", `%KAKEL_NOT_SET%;C:\tools`},
-			{"100% and %%", "100% and %%"},
+			{"100% of %KAKEL_TOOLS%", `100% of C:\tools`},
+			{"%%KAKEL_TOOLS%%", "%KAKEL_TOOLS%"},
+			{"100%% and 5%", "100% and 5%"},
 			{"$KAKEL_TOOLS", "$KAKEL_TOOLS"},
 		}
 	}

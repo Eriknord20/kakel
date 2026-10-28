@@ -17,8 +17,10 @@ The whole list. The [README](README.md) has the short version.
   Windows Terminal does: `C:\msys64\usr\bin\bash.exe --login -i`.
   A profile may name a folder to start in and variables to set, one
   `NAME=value` a line; a value may use one set already, as
-  `PATH=C:\tools;%PATH%` does. A WSL profile carries them into the
-  distribution, a Windows path translated. It is offered with the
+  `PATH=C:\tools;%PATH%` does, or `$PATH` on Linux and macOS. A name
+  not set stays as written, and `%%` or `$$` writes one sign. A WSL
+  profile carries them into the distribution, a Windows path
+  translated. It is offered with the
   shells found here, in the palette, the split chooser, the launcher,
   the tray and the Shell setting, and can be the shell new terminals
   start. Renaming it keeps

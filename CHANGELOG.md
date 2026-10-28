@@ -19,7 +19,8 @@ use ones set already, as `PATH=C:\tools;%PATH%` does. It is
 listed with Command Prompt, PowerShell, Git Bash and the WSL
 distributions everywhere they are: the palette, the split chooser, the
 launcher, the tray and the Shell setting. kakel types its setup line
-into bash, zsh, sh, ksh, dash, PowerShell, Command Prompt and WSL;
+into bash, zsh, sh, ksh, dash, PowerShell, Command Prompt and WSL,
+unless the profile gives it a command to run, as `bash -c` does;
 another program starts as it is. A saved server has profiles of its
 own, such as `tmux new -A -s main`, and its dialog can make one what
 its New Terminal opens. These need a POSIX server: variables go through
