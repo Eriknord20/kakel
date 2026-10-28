@@ -48,7 +48,7 @@ func (a *app) scanShells() {
 			if err != nil {
 				a.failed("Couldn't list the shells here", err.Error())
 			}
-			a.detected, a.scanned = found, err == nil
+			a.detected, a.scanned, a.looked = found, err == nil, true
 			a.mergeShells()
 			a.ownShell = ""
 			if argv, err := session.DefaultShell(); err == nil {

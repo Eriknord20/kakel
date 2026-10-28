@@ -1,8 +1,10 @@
 package app
 
 import (
+	"errors"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -203,11 +205,46 @@ func TestAProfilesVariablesReachItsShell(t *testing.T) {
 			[]string{"FOO=/x", "WSLENV=FOO/l:TERM_PROGRAM/u:TERM_PROGRAM_VERSION/u"}},
 		{wsl, nil,
 			[]string{"WSLENV=USERPROFILE/p:TERM_PROGRAM/u:TERM_PROGRAM_VERSION/u"}},
+		// A Windows path is translated, one path with p and a list with
+		// l, and PATH stays out, as WSL adds the Windows one itself.
+		{wsl, []string{`JAVA_HOME=C:\jdk`, `TOOLS=C:\a;D:\b`, `PATH=C:\tools`},
+			[]string{`JAVA_HOME=C:\jdk`, `TOOLS=C:\a;D:\b`, `PATH=C:\tools`,
+				"WSLENV=USERPROFILE/p:TERM_PROGRAM/u:TERM_PROGRAM_VERSION/u:JAVA_HOME/pu:TOOLS/lu"}},
 	} {
 		got := paneEnv(c.argv, "", c.set)
 		if len(got) < 2 || !strings.HasPrefix(got[0], "TERM_PROGRAM=") || !slices.Equal(got[2:], c.want) {
 			t.Errorf("%q with %q is started with %q, want the terminal's name and then %q", c.argv, c.set, got, c.want)
 		}
+	}
+}
+
+// A profile's value may name a variable there already, written as this
+// system's shell writes one, so a profile can add to PATH rather than
+// take its place. On Windows a name not set stays as it is written, as
+// cmd leaves it.
+func TestAProfilesValuesNameTheVariablesThere(t *testing.T) {
+	t.Setenv("KAKEL_TOOLS", `C:\tools`)
+	cases := []struct{ value, want string }{
+		{"$KAKEL_TOOLS:/bin", `C:\tools:/bin`},
+		{"${KAKEL_TOOLS}x", `C:\toolsx`},
+		{"plain", "plain"},
+	}
+	if runtime.GOOS == "windows" {
+		cases = []struct{ value, want string }{
+			{`D:\bin;%KAKEL_TOOLS%`, `D:\bin;C:\tools`},
+			{"%kakel_tools%", `C:\tools`},
+			{"%KAKEL_NOT_SET%;%KAKEL_TOOLS%", `%KAKEL_NOT_SET%;C:\tools`},
+			{"100% and %%", "100% and %%"},
+			{"$KAKEL_TOOLS", "$KAKEL_TOOLS"},
+		}
+	}
+	for _, c := range cases {
+		if got := expandVars(c.value); got != c.want {
+			t.Errorf("%q reads as %q, want %q", c.value, got, c.want)
+		}
+	}
+	if got := paneEnv([]string{"nu"}, "", []string{"P=" + cases[0].value}); got[len(got)-1] != "P="+cases[0].want {
+		t.Errorf("a profile setting %q starts its shell with %q", cases[0].value, got)
 	}
 }
 
@@ -242,6 +279,48 @@ func TestOnlyAProfileRunningAKnownShellIsTaught(t *testing.T) {
 	a.st.ShellSetup = false
 	if a.teaches(nil) {
 		t.Error("with Shell Setup off, the user's own shell is taught")
+	}
+}
+
+// A pane here running a profile's program the shell setup is not
+// written for is of no kind a paste is coloured for, as a server's is
+// not: its lines are its own language, not slips into the wrong shell.
+func TestAPaneRunningAnUnknownProgramIsOfNoShellKind(t *testing.T) {
+	a := fontApp(t)
+	a.handle(SaveProfile{Profile: settings.Profile{Name: "Nushell", Command: []string{"nu"}}})
+	a.handle(SaveProfile{Profile: settings.Profile{Name: "Git Bash", Command: []string{"bash", "-l"}}})
+	for _, c := range []struct {
+		argv []string
+		kind shellsetup.Route
+	}{
+		{[]string{"nu"}, shellsetup.NoRoute},
+		{[]string{"bash", "-l"}, shellsetup.Posix},
+		{[]string{`C:\Windows\System32\cmd.exe`}, shellsetup.Cmd},
+	} {
+		a.argvs["p1"] = c.argv
+		if got := a.shellKindOf(Pane{ID: "p1"}); got != c.kind {
+			t.Errorf("a pane running %q is of kind %v, want %v", c.argv, got, c.kind)
+		}
+	}
+}
+
+// The profiles here are offered even when looking for the shells
+// fails, as the shells it did find are.
+func TestProfilesAreOfferedWhenTheShellsCannotBeListed(t *testing.T) {
+	was := findShells
+	findShells = func() ([]shellfind.Shell, error) { return nil, errors.New("wsl.exe did not answer") }
+	t.Cleanup(func() { findShells = was })
+	a := fontApp(t)
+	a.handle(SaveProfile{Profile: settings.Profile{Name: "Nushell", Command: []string{"nu"}}})
+	a.scanShells()
+	waitFor(t, a, "the search for shells to answer", func() bool { return a.looked })
+	a.handle(SaveProfile{Profile: settings.Profile{Name: "MSYS2", Command: []string{"bash", "--login", "-i"}}})
+	var got []string
+	for _, s := range a.st.Shells {
+		got = append(got, s.ID)
+	}
+	if want := []string{"profile:nushell", "profile:msys2"}; !slices.Equal(got, want) {
+		t.Fatalf("with the shells not listed, the menus offer %q, want %q", got, want)
 	}
 }
 
@@ -324,7 +403,7 @@ func TestAServerProfileIsCheckedOnItsServer(t *testing.T) {
 		wantErr                  string
 	}{
 		{"another's name on the server", "", "TMUX", "htop", "", "", "name already used"},
-		{"another's command line on the server", "", "Main", "tmux new -A", "", "", "command line already used"},
+		{"another's command line on the server", "", "Main", "tmux new -A", "~/src", "FOO=bar", ""},
 		{"this computer's name and command line", "", "Git Bash", "bash", "", "", ""},
 		{"another server's name and command line", "", "top", "top", "", "", ""},
 		{"a program not here", "", "Nu", "nu -l", "", "", ""},
@@ -359,7 +438,7 @@ func TestAServerProfileIsCheckedOnItsServer(t *testing.T) {
 func TestAServerProfileIsNoShellHere(t *testing.T) {
 	a := fontApp(t)
 	a.handle(SaveProfile{Profile: settings.Profile{Name: "tmux", HostID: "srv", Command: []string{"tmux"}, Folder: t.TempDir()}})
-	a.detected = []shellfind.Shell{{ID: "cmd", Title: "Command Prompt", Path: `C:\Windows\System32\cmd.exe`}}
+	a.detected, a.looked = []shellfind.Shell{{ID: "cmd", Title: "Command Prompt", Path: `C:\Windows\System32\cmd.exe`}}, true
 	a.mergeShells()
 	if len(a.st.Shells) != 1 || a.st.Shells[0].ID != "cmd" || a.shellCommand("profile:tmux") != nil {
 		t.Fatalf("the shells here are %+v", a.st.Shells)

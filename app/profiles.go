@@ -73,11 +73,11 @@ func ParseProfile(have []settings.Profile, id, hostID, name, line, folder, env s
 			return p, errors.New(argv[0] + " not found")
 		}
 	}
-	// A pane knows its profile only by the command it runs, as profileOf
-	// reads it, so two profiles running one command would both start as
-	// the first.
+	// A pane here knows its profile only by the command it runs, as
+	// profileOf reads it, so two profiles running one command would both
+	// start as the first. A server's pane keeps its profile by id.
 	for _, other := range others {
-		if slices.EqualFunc(withoutFolder(other.Command), withoutFolder(argv), strings.EqualFold) {
+		if hostID == "" && slices.EqualFunc(withoutFolder(other.Command), withoutFolder(argv), strings.EqualFold) {
 			return p, errors.New("command line already used")
 		}
 	}
@@ -148,10 +148,13 @@ func (a *app) saveProfile(p settings.Profile) error {
 	if a.settings == nil {
 		return errors.New("the settings could not be read, so nothing can be kept")
 	}
+	var err error
 	if p.ID == "" {
-		p.ID = profileID(p.Name, a.st.Profiles)
+		err = a.settings.AddProfile(p, func(have []settings.Profile) string { return profileID(p.Name, have) })
+	} else {
+		err = a.settings.PutProfile(p)
 	}
-	if err := a.settings.PutProfile(p); err != nil {
+	if err != nil {
 		return err
 	}
 	a.st.Profiles = a.settings.Profiles()
@@ -192,7 +195,7 @@ func (a *app) mergeShells() {
 			a.found = append(a.found, profileShell(p))
 		}
 	}
-	if !a.scanned && a.detected == nil {
+	if !a.looked {
 		return
 	}
 	a.st.Shells = nil

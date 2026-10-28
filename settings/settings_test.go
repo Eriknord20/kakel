@@ -1194,6 +1194,45 @@ func TestTheRelayIsRemembered(t *testing.T) {
 	}
 }
 
+// A new profile's id is chosen from the profiles the file holds as it
+// is saved, so two kakels that each add one under the same name keep
+// both, rather than the second writing over the first.
+func TestAProfileAddedElsewhereKeepsItsID(t *testing.T) {
+	path := at(t)
+	here, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	there, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idFor := func(have []Profile) string {
+		id := "profile:msys2"
+		for n := 2; slices.ContainsFunc(have, func(p Profile) bool { return p.ID == id }); n++ {
+			id = "profile:msys2-" + strconv.Itoa(n)
+		}
+		return id
+	}
+	if err := there.AddProfile(Profile{Name: "MSYS2", Command: []string{"bash"}}, idFor); err != nil {
+		t.Fatal(err)
+	}
+	if err := here.AddProfile(Profile{Name: "MSYS2", Command: []string{"zsh"}}, idFor); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range again.Profiles() {
+		got = append(got, p.ID+" "+p.Command[0])
+	}
+	if want := []string{"profile:msys2 bash", "profile:msys2-2 zsh"}; !slices.Equal(got, want) {
+		t.Fatalf("both added, the file holds %q, want %q", got, want)
+	}
+}
+
 // A profile is added after the rest, put in place of the one with its
 // id when edited, and taken out alone; what is saved comes back.
 func TestProfilesAreAddedEditedAndRemoved(t *testing.T) {

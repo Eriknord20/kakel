@@ -84,3 +84,37 @@ func TestCarryingLeavesNoEmptyEntry(t *testing.T) {
 		t.Errorf("it is %q, want the name carried", got)
 	}
 }
+
+// A name may bring a flag of its own, which goes in front of the u that
+// carries it in, as WSLENV writes a name's flags together.
+func TestCarryingKeepsANamesOwnFlag(t *testing.T) {
+	got := CarryIntoWSL("", "JAVA_HOME/p", "TOOLS/l", "FOO/")
+
+	if want := "JAVA_HOME/pu:TOOLS/lu:FOO/u"; got != want {
+		t.Errorf("it is %q, want %q", got, want)
+	}
+}
+
+// A value that is a Windows path is translated for the distribution,
+// a list of them as a list, and anything else goes in as it is.
+func TestAWindowsPathIsTranslated(t *testing.T) {
+	for value, want := range map[string]string{
+		`C:\jdk`:               "p",
+		`c:/tools`:             "p",
+		`\\nas\share`:          "p",
+		`C:\a;D:\b`:            "l",
+		`C:\a;`:                "l",
+		`C:\tools;%PATH%`:      "",
+		"bar":                  "",
+		"/usr/local/bin":       "",
+		"":                     "",
+		";":                    "",
+		`C:`:                   "",
+		`1:\x`:                 "",
+		`https://example.com/`: "",
+	} {
+		if got := PathFlag(value); got != want {
+			t.Errorf("%q is carried with %q, want %q", value, got, want)
+		}
+	}
+}

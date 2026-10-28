@@ -703,6 +703,17 @@ func (s *Settings) PutProfile(p Profile) error {
 	})
 }
 
+// AddProfile adds p after the rest, with the id idFor gives it, and
+// saves. idFor is handed the profiles as the file holds them now, not
+// as this window last read them, so a profile another kakel added since
+// keeps its id.
+func (s *Settings) AddProfile(p Profile, idFor func(have []Profile) string) error {
+	return s.putProfiles(func(have []Profile) []Profile {
+		p.ID = idFor(have)
+		return append(have, p)
+	})
+}
+
 // DropProfile takes the profile with id out of the list and saves.
 func (s *Settings) DropProfile(id string) error {
 	return s.putProfiles(func(have []Profile) []Profile {

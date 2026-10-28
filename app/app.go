@@ -810,10 +810,12 @@ type app struct {
 	// detected are the shells findShells found on this machine, once
 	// scanned says they have been looked for, and found are those and
 	// then the profiles; shellGoneSaid says the kept shell was found
-	// gone, which is said once a run.
+	// gone, which is said once a run. looked says the search has
+	// answered, which it does even when it fails.
 	detected      []shellfind.Shell
 	found         []shellfind.Shell
 	scanned       bool
+	looked        bool
 	shellGoneSaid bool
 	// ownShell is the ID of the user's own shell among those found.
 	ownShell string
@@ -2073,7 +2075,11 @@ func (a *app) openThen(machine machines.ID, at Placement, then func(id string, e
 func (a *app) shellKindOf(p Pane) shellsetup.Route {
 	switch {
 	case p.Machine == "":
-		return shellsetup.RouteFor(a.localArgv(p.ID))
+		argv := a.localArgv(p.ID)
+		if _, ok := a.profileOf(argv); ok && !shellsetup.Knows(argv) {
+			return shellsetup.NoRoute
+		}
+		return shellsetup.RouteFor(argv)
 	case a.machines.Get(p.Machine).Window != nil:
 		return shellsetup.NoRoute
 	}

@@ -3,6 +3,7 @@ package app
 import (
 	"net"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/marrasen/kakel/machines"
@@ -96,29 +97,69 @@ func (a *app) teachFar(machine machines.ID, sess session.Session, argv []string)
 
 // paneEnv is what a shell here is told about the terminal it runs in,
 // and then the variables its profile sets, each NAME=value, which come
-// last so that one of them can name the terminal otherwise.
+// last so that one of them can name the terminal otherwise. A value may
+// name the variables there already, as PATH=C:\tools;%PATH% does.
 //
-// A WSL shell is also told to carry every one of them into the
-// distribution, on top of the WSLENV the profile sets, or else the one
-// the window runs with.
+// A WSL shell is also told to carry each of them into the distribution,
+// a Windows path translated, on top of the WSLENV the profile sets, or
+// else the one the window runs with. PATH stays out: carried, it would
+// take the place of the distribution's own, and WSL adds the Windows
+// one to that by itself.
 func paneEnv(argv []string, called string, set []string) []string {
 	if called == "" {
 		called = build.Name
 	}
 	env := []string{"TERM_PROGRAM=" + called, "TERM_PROGRAM_VERSION=" + build.Version()}
-	if !shellfind.IsWSL(argv) {
-		return append(env, set...)
-	}
+	wsl := shellfind.IsWSL(argv)
 	carry, was := []string{"TERM_PROGRAM", "TERM_PROGRAM_VERSION"}, os.Getenv("WSLENV")
 	for _, v := range set {
 		name, value, _ := strings.Cut(v, "=")
-		if strings.EqualFold(name, "WSLENV") {
+		value = expandVars(value)
+		switch {
+		case wsl && strings.EqualFold(name, "WSLENV"):
 			was = value
 			continue
+		case wsl && !strings.EqualFold(name, "PATH"):
+			carry = append(carry, name+"/"+shellfind.PathFlag(value))
 		}
-		env, carry = append(env, v), append(carry, name)
+		env = append(env, name+"="+value)
+	}
+	if !wsl {
+		return env
 	}
 	return append(env, "WSLENV="+shellfind.CarryIntoWSL(was, carry...))
+}
+
+// expandVars is value with the variables it names filled in, as this
+// system's own shell would: %NAME% on Windows, where a name not set is
+// left as it is written, as cmd leaves it, and $NAME or ${NAME}
+// elsewhere.
+func expandVars(value string) string {
+	if runtime.GOOS != "windows" {
+		return os.ExpandEnv(value)
+	}
+	var out strings.Builder
+	for {
+		start := strings.IndexByte(value, '%')
+		if start < 0 {
+			break
+		}
+		length := strings.IndexByte(value[start+1:], '%')
+		if length < 0 {
+			break
+		}
+		end := start + 1 + length
+		if got, ok := os.LookupEnv(value[start+1 : end]); ok && length > 0 {
+			out.WriteString(value[:start] + got)
+			value = value[end+1:]
+			continue
+		}
+		// Not a variable: the first % is a letter, and the second may
+		// start one.
+		out.WriteString(value[:end])
+		value = value[end:]
+	}
+	return out.String() + value
 }
 
 // dirHere is the folder of the focused pane's shell, when it is on this

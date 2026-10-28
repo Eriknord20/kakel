@@ -14,7 +14,8 @@ change how something behaves.
 **Profiles, for shells kakel does not find.** Settings › Terminal ›
 Profiles adds a shell by its command line, such as MSYS2 with
 `C:\msys64\usr\bin\bash.exe --login -i`, nushell or `ssh host`. A
-profile can start in a folder of its own and set variables. It is
+profile can start in a folder of its own and set variables, which may
+use ones set already, as `PATH=C:\tools;%PATH%` does. It is
 listed with Command Prompt, PowerShell, Git Bash and the WSL
 distributions everywhere they are: the palette, the split chooser, the
 launcher, the tray and the Shell setting. kakel types its setup line

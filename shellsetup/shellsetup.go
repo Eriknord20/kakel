@@ -59,15 +59,44 @@ func RouteFor(argv []string) Route {
 // for. A program it does not know, such as nushell, python or ssh,
 // would take them as its own input, so a profile running one is left
 // alone.
+//
+// wsl is a shell only when it starts the distribution's login shell. A
+// command it is given, as in wsl -e nu or wsl htop, is the program the
+// lines would reach, so that is the one asked about.
 func Knows(argv []string) bool {
 	if len(argv) == 0 {
 		return false
 	}
 	switch strings.TrimSuffix(strings.ToLower(shells.CommandBase(argv[0])), ".exe") {
-	case "bash", "zsh", "sh", "ksh", "dash", "cmd", "powershell", "pwsh", "wsl":
+	case "bash", "zsh", "sh", "ksh", "dash", "cmd", "powershell", "pwsh":
+		return true
+	case "wsl":
+		if run := wslRuns(argv[1:]); len(run) > 0 {
+			return Knows(run)
+		}
 		return true
 	}
 	return false
+}
+
+// wslRuns is the command wsl's arguments run in the distribution, nil
+// for its login shell: what follows -e, --exec or --, or else the first
+// word that is not an option, which wsl runs through that shell.
+func wslRuns(args []string) []string {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-e", "--exec", "--":
+			return args[i+1:]
+		case "-d", "--distribution", "--distribution-id", "-u", "--user", "--cd", "--shell-type":
+			// Each takes the word after it as its value.
+			i++
+		default:
+			if !strings.HasPrefix(args[i], "-") {
+				return args[i:]
+			}
+		}
+	}
+	return nil
 }
 
 // Lines are what to type into a shell of that kind, one line each,
