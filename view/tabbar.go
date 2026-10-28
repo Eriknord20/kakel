@@ -268,11 +268,15 @@ func (b *tabBar) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children)
 	return c.Constrain(geom.Sz(c.Max.W, h))
 }
 
-// Paint implements [gunim.Node]: the bar, as far as it has faded in.
-func (b *tabBar) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
+// Paint implements [gunim.Node]: the bar, as far as it has faded in,
+// on the title bar's fill. The bar is Plain and draws no fill of its
+// own, so without this the window's background would show behind the
+// tabs.
+func (b *tabBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	if !b.shown() {
 		return
 	}
+	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(widget.MenubarFill.Get(f.Theme)))
 	if fade := min(max(b.fade.Value(), 0), 1); fade < 1 {
 		defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: fade})()
 	}

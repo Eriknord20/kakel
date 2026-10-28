@@ -14,6 +14,8 @@ import (
 	"github.com/marrasen/gunim/filemanager"
 	"github.com/marrasen/gunim/geom"
 	gi "github.com/marrasen/gunim/input"
+	"github.com/marrasen/gunim/paint"
+	"github.com/marrasen/gunim/widget"
 	"github.com/marrasen/gunim/widget/dock"
 )
 
@@ -127,6 +129,25 @@ func TestTheTabBarShowsWithOneTab(t *testing.T) {
 	if !b.shown() || len(b.bar.Tabs()) != 1 || win.bar.Subtitle != "" {
 		t.Fatalf("back to one tab the bar shows %v with %d tabs, the title bar says %q", b.shown(), len(b.bar.Tabs()), win.bar.Subtitle)
 	}
+}
+
+// The tabs stand on the title bar's fill, as the rest of the title bar
+// does: gunim's bar is Plain and draws none of its own.
+func TestTheTabsStandOnTheTitleBarsFill(t *testing.T) {
+	win, _, publish := windowStage(t)
+	publish(twoTabs())
+	settle()
+	r, ok := lastUI.Bounds(win.tabs)
+	if !ok || r.Empty() {
+		t.Fatal("the tab bar is not drawn")
+	}
+	fill := widget.MenubarFill.Get(lastUI.Theme())
+	for _, op := range lastWindow.Offscreen().Ops() {
+		if rr, ok := op.(*paint.RRectOp); ok && rr.Fill.Solid == fill && rr.Rect.Size() == r.Size() {
+			return
+		}
+	}
+	t.Fatalf("nothing paints the title bar's fill behind the tabs, %v", r)
 }
 
 // A click shows a tab, a middle click closes it, and so does its ×;

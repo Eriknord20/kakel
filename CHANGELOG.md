@@ -25,6 +25,12 @@ its New Terminal opens. These need a POSIX server: variables go through
 `env`, the folder through `cd`, and `.profile` is read only when the
 command asks for a login shell, as `bash -l` does.
 
+### Fixed
+
+**The title bar is one colour again behind the tabs.** Since the tabs
+moved to gunim's shared tab bar in v0.12.1, the room around the tabs
+showed the terminal's darker background instead of the title bar's.
+
 ## v0.12.2-beta.4
 
 ### Added
