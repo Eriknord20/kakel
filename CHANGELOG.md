@@ -9,6 +9,12 @@ change how something behaves.
 
 ## Unreleased
 
+### Fixed
+
+**The title bar is one colour again behind the tabs.** Since the tabs
+moved to gunim's shared tab bar in v0.12.1, the room around the tabs
+showed the terminal's darker background instead of the title bar's.
+
 ## v0.12.2-beta.4
 
 ### Added
